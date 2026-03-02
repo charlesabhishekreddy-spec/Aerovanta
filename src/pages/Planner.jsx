@@ -18,6 +18,7 @@ import {
   AlertCircle,
   FlaskConical,
   MapPin,
+  Target,
 } from "lucide-react";
 
 const SOIL_TYPES = [
@@ -31,6 +32,13 @@ const SOIL_TYPES = [
   "Peaty",
   "Chalky",
   "Unknown / Mixed",
+];
+
+const EXAMPLE_CROPS = [
+  "Tomatoes", "Corn", "Wheat", "Soybeans", "Potatoes", "Lettuce",
+  "Carrots", "Peppers", "Cucumbers", "Rice", "Beans", "Peas",
+  "Onions", "Spinach", "Broccoli", "Squash", "Watermelon",
+  "Eggplant", "Sweet Potatoes", "Strawberries", "Sunflowers", "Garlic",
 ];
 
 const STATUS_BADGE = {
@@ -51,6 +59,21 @@ const STAGE_COLORS = {
   harvest: "bg-emerald-100 text-emerald-700",
 };
 
+/**
+ * Compute the current week number (1-based) given a planting date string.
+ * Returns null if the planting date is in the future or past harvest.
+ */
+const getCurrentWeek = (plantingDateStr, totalWeeks) => {
+  if (!plantingDateStr) return null;
+  const planting = new Date(`${plantingDateStr}T12:00:00`);
+  const today = new Date();
+  const daysSincePlanting = Math.floor((today - planting) / (1000 * 60 * 60 * 24));
+  if (daysSincePlanting < 0) return null;
+  const week = Math.floor(daysSincePlanting / 7) + 1;
+  if (week > totalWeeks) return null;
+  return week;
+};
+
 export default function Planner() {
   const queryClient = useQueryClient();
 
@@ -64,6 +87,7 @@ export default function Planner() {
   // UI state
   const [isGenerating, setIsGenerating] = useState(false);
   const [timeline, setTimeline] = useState(null);
+  const [savedPlantingDate, setSavedPlantingDate] = useState(null);
   const [error, setError] = useState(null);
   const [successMessage, setSuccessMessage] = useState(null);
   const [expandedWeeks, setExpandedWeeks] = useState({});
@@ -136,11 +160,19 @@ Format as a structured timeline with specific weeks and actionable tasks.`;
       }
 
       setTimeline(result);
-      // Expand all weeks by default
+      setSavedPlantingDate(plantingDate);
+      // Expand the current week and the next 2 weeks by default; collapse the rest
+      const currentWeek = getCurrentWeek(plantingDate, result.total_weeks);
       const expanded = {};
       result.timeline.forEach((w) => {
-        expanded[w.week] = true;
+        expanded[w.week] =
+          currentWeek === null ||
+          (w.week >= currentWeek && w.week <= currentWeek + 2);
       });
+      // Always open at least the first week if no current week
+      if (currentWeek === null) {
+        result.timeline.forEach((w) => { expanded[w.week] = true; });
+      }
       setExpandedWeeks(expanded);
 
       await appClient.entities.CropPlan.create({
@@ -193,6 +225,14 @@ Format as a structured timeline with specific weeks and actionable tasks.`;
     }
   };
 
+  // For the generated timeline, compute current week
+  const currentWeekNumber = timeline
+    ? getCurrentWeek(savedPlantingDate, timeline.total_weeks)
+    : null;
+  const progressPercent = timeline && currentWeekNumber
+    ? Math.round((currentWeekNumber / timeline.total_weeks) * 100)
+    : null;
+
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
       <div>
@@ -215,9 +255,12 @@ Format as a structured timeline with specific weeks and actionable tasks.`;
                 id="crop"
                 value={cropName}
                 onChange={(e) => setCropName(e.target.value)}
-                placeholder="e.g., Tomatoes, Corn, Wheat, Carrots"
+                placeholder="e.g., Tomatoes, Rice, Garlic, Beans…"
                 className="mt-1"
               />
+              <p className="text-xs text-gray-400 mt-1">
+                Supported: {EXAMPLE_CROPS.slice(0, 10).join(", ")}, and more
+              </p>
             </div>
             <div>
               <Label htmlFor="date">Planting Date *</Label>
@@ -314,7 +357,7 @@ Format as a structured timeline with specific weeks and actionable tasks.`;
           <Card className="border-none shadow-lg overflow-hidden">
             <div className="bg-gradient-to-r from-violet-600/90 via-purple-600/85 to-fuchsia-600/85 p-6 text-white">
               <h3 className="text-2xl font-bold mb-2">{timeline.crop_name} Growing Plan</h3>
-              <div className="flex flex-wrap gap-4 text-sm">
+              <div className="flex flex-wrap gap-4 text-sm mb-4">
                 <div className="flex items-center gap-2">
                   <Calendar className="w-4 h-4" />
                   <span>Duration: {timeline.total_weeks} weeks</span>
@@ -329,7 +372,29 @@ Format as a structured timeline with specific weeks and actionable tasks.`;
                     <span>{location}</span>
                   </div>
                 )}
+                {currentWeekNumber && (
+                  <div className="flex items-center gap-2">
+                    <Target className="w-4 h-4" />
+                    <span>Currently: Week {currentWeekNumber} of {timeline.total_weeks}</span>
+                  </div>
+                )}
               </div>
+
+              {/* Progress bar */}
+              {progressPercent !== null && (
+                <div>
+                  <div className="flex justify-between text-xs text-white/80 mb-1">
+                    <span>Growing Progress</span>
+                    <span>{progressPercent}%</span>
+                  </div>
+                  <div className="w-full bg-white/20 rounded-full h-2">
+                    <div
+                      className="bg-white rounded-full h-2 transition-all"
+                      style={{ width: `${progressPercent}%` }}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
             <CardContent className="p-6">
               <div className="grid md:grid-cols-3 gap-4">
@@ -361,62 +426,129 @@ Format as a structured timeline with specific weeks and actionable tasks.`;
           {/* Week-by-Week Timeline */}
           <Card className="border-none shadow-lg">
             <CardHeader className="border-b">
-              <CardTitle>Week-by-Week Timeline</CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle>Week-by-Week Timeline</CardTitle>
+                <div className="flex gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-xs text-gray-500"
+                    onClick={() => {
+                      const allExpanded = {};
+                      timeline.timeline.forEach((w) => { allExpanded[w.week] = true; });
+                      setExpandedWeeks(allExpanded);
+                    }}
+                  >
+                    Expand All
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-xs text-gray-500"
+                    onClick={() => setExpandedWeeks({})}
+                  >
+                    Collapse All
+                  </Button>
+                </div>
+              </div>
             </CardHeader>
             <CardContent className="p-6">
               <div className="space-y-3">
-                {timeline.timeline?.map((week) => (
-                  <div
-                    key={week.week}
-                    className="relative pl-10 border-l-2 border-violet-200 last:border-0 pb-3"
-                  >
-                    <div className="absolute left-0 top-0 -translate-x-1/2 bg-violet-600 text-white rounded-full w-8 h-8 flex items-center justify-center font-bold text-sm shadow">
-                      {week.week}
-                    </div>
-                    <div className="bg-white border rounded-lg overflow-hidden">
-                      <button
-                        className="w-full flex items-center justify-between p-3 hover:bg-gray-50 transition-colors text-left"
-                        onClick={() => toggleWeek(week.week)}
+                {timeline.timeline?.map((week) => {
+                  const isCurrent = currentWeekNumber === week.week;
+                  const isPast = currentWeekNumber !== null && week.week < currentWeekNumber;
+                  return (
+                    <div
+                      key={week.week}
+                      className={`relative pl-10 border-l-2 last:border-0 pb-3 ${
+                        isCurrent ? "border-violet-500" : isPast ? "border-gray-200" : "border-violet-200"
+                      }`}
+                    >
+                      <div
+                        className={`absolute left-0 top-0 -translate-x-1/2 text-white rounded-full w-8 h-8 flex items-center justify-center font-bold text-sm shadow ${
+                          isCurrent
+                            ? "bg-violet-700 ring-2 ring-violet-400 ring-offset-2"
+                            : isPast
+                            ? "bg-gray-400"
+                            : "bg-violet-600"
+                        }`}
                       >
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold text-gray-900 text-sm">
-                            Week {week.week}
-                          </span>
-                          <span className="text-xs text-gray-500 hidden sm:block">—</span>
-                          <span className="text-xs text-violet-700 font-medium hidden sm:block">
-                            {week.stage}
-                          </span>
-                        </div>
-                        {expandedWeeks[week.week] ? (
-                          <ChevronUp className="w-4 h-4 text-gray-400 shrink-0" />
-                        ) : (
-                          <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />
-                        )}
-                      </button>
-
-                      {expandedWeeks[week.week] && (
-                        <div className="px-4 pb-4 border-t">
-                          <p className="text-xs font-medium text-violet-600 uppercase tracking-wide mt-3 mb-2">
-                            {week.stage}
-                          </p>
-                          <div className="space-y-1.5 mb-3">
-                            {week.activities?.map((activity, i) => (
-                              <div key={activity || i} className="flex items-start gap-2">
-                                <div className="w-1.5 h-1.5 rounded-full bg-violet-500 mt-1.5 shrink-0" />
-                                <span className="text-sm text-gray-700">{activity}</span>
-                              </div>
-                            ))}
+                        {isPast ? "✓" : week.week}
+                      </div>
+                      <div
+                        className={`bg-white border rounded-lg overflow-hidden ${
+                          isCurrent ? "border-violet-400 shadow-sm shadow-violet-100" : ""
+                        }`}
+                      >
+                        <button
+                          className={`w-full flex items-center justify-between p-3 transition-colors text-left ${
+                            isCurrent ? "bg-violet-50 hover:bg-violet-100" : "hover:bg-gray-50"
+                          }`}
+                          onClick={() => toggleWeek(week.week)}
+                        >
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span
+                              className={`font-semibold text-sm ${
+                                isCurrent ? "text-violet-800" : isPast ? "text-gray-400" : "text-gray-900"
+                              }`}
+                            >
+                              Week {week.week}
+                            </span>
+                            {isCurrent && (
+                              <span className="text-xs bg-violet-600 text-white px-2 py-0.5 rounded-full font-medium">
+                                📍 Current Week
+                              </span>
+                            )}
+                            <span className="text-xs text-gray-500 hidden sm:block">—</span>
+                            <span
+                              className={`text-xs font-medium hidden sm:block ${
+                                isCurrent ? "text-violet-700" : isPast ? "text-gray-400" : "text-violet-700"
+                              }`}
+                            >
+                              {week.stage}
+                            </span>
                           </div>
-                          {week.tips && (
-                            <div className="rounded-lg border border-violet-200/80 bg-violet-50/70 p-3">
-                              <p className="text-sm text-violet-900">💡 {week.tips}</p>
-                            </div>
+                          {expandedWeeks[week.week] ? (
+                            <ChevronUp className="w-4 h-4 text-gray-400 shrink-0" />
+                          ) : (
+                            <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />
                           )}
-                        </div>
-                      )}
+                        </button>
+
+                        {expandedWeeks[week.week] && (
+                          <div className="px-4 pb-4 border-t">
+                            <p className="text-xs font-medium text-violet-600 uppercase tracking-wide mt-3 mb-2">
+                              {week.stage}
+                            </p>
+                            <div className="space-y-1.5 mb-3">
+                              {week.activities?.map((activity, i) => (
+                                <div key={activity || i} className="flex items-start gap-2">
+                                  <div
+                                    className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${
+                                      isCurrent ? "bg-violet-600" : isPast ? "bg-gray-300" : "bg-violet-500"
+                                    }`}
+                                  />
+                                  <span
+                                    className={`text-sm ${
+                                      isPast ? "text-gray-400 line-through" : "text-gray-700"
+                                    }`}
+                                  >
+                                    {activity}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                            {week.tips && (
+                              <div className="rounded-lg border border-violet-200/80 bg-violet-50/70 p-3">
+                                <p className="text-sm text-violet-900">💡 {week.tips}</p>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </CardContent>
           </Card>
@@ -433,154 +565,193 @@ Format as a structured timeline with specific weeks and actionable tasks.`;
             </CardTitle>
           </CardHeader>
           <CardContent className="p-6 space-y-3">
-            {savedPlans.map((plan) => (
-              <div key={plan.id} className="border rounded-lg overflow-hidden">
-                <div className="flex items-center justify-between p-4 bg-gray-50">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h4 className="font-semibold text-gray-900">{plan.crop_name}</h4>
-                      <span
-                        className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                          STATUS_BADGE[plan.status] || STATUS_BADGE.planning
-                        }`}
-                      >
-                        {plan.status}
-                      </span>
-                      {plan.growth_stage && (
+            {savedPlans.map((plan) => {
+              const planCurrentWeek = plan.planting_date && Array.isArray(plan.timeline)
+                ? getCurrentWeek(plan.planting_date, plan.timeline.length)
+                : null;
+              const planProgress = planCurrentWeek && Array.isArray(plan.timeline)
+                ? Math.round((planCurrentWeek / plan.timeline.length) * 100)
+                : null;
+              return (
+                <div key={plan.id} className="border rounded-lg overflow-hidden">
+                  <div className="flex items-center justify-between p-4 bg-gray-50">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h4 className="font-semibold text-gray-900">{plan.crop_name}</h4>
                         <span
-                          className={`text-xs px-2 py-0.5 rounded-full ${
-                            STAGE_COLORS[plan.growth_stage] || "bg-gray-100 text-gray-600"
+                          className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                            STATUS_BADGE[plan.status] || STATUS_BADGE.planning
                           }`}
                         >
-                          {plan.growth_stage.replace(/_/g, " ")}
+                          {plan.status}
                         </span>
+                        {plan.growth_stage && (
+                          <span
+                            className={`text-xs px-2 py-0.5 rounded-full ${
+                              STAGE_COLORS[plan.growth_stage] || "bg-gray-100 text-gray-600"
+                            }`}
+                          >
+                            {plan.growth_stage.replace(/_/g, " ")}
+                          </span>
+                        )}
+                        {planCurrentWeek && (
+                          <span className="text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full font-medium">
+                            Week {planCurrentWeek}{Array.isArray(plan.timeline) ? ` / ${plan.timeline.length}` : ""}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-4 mt-1 text-xs text-gray-500 flex-wrap">
+                        {plan.planting_date && (
+                          <span className="flex items-center gap-1">
+                            <Calendar className="w-3 h-3" /> Planted: {plan.planting_date}
+                          </span>
+                        )}
+                        {plan.expected_harvest_date && (
+                          <span className="flex items-center gap-1">
+                            <Sprout className="w-3 h-3" /> Harvest: {plan.expected_harvest_date}
+                          </span>
+                        )}
+                        {plan.location && (
+                          <span className="flex items-center gap-1">
+                            <MapPin className="w-3 h-3" /> {plan.location}
+                          </span>
+                        )}
+                      </div>
+                      {/* Inline progress bar for active plans */}
+                      {planProgress !== null && plan.status === "active" && (
+                        <div className="mt-2">
+                          <div className="flex justify-between text-xs text-gray-400 mb-0.5">
+                            <span>Growing progress</span>
+                            <span>{planProgress}%</span>
+                          </div>
+                          <div className="w-full bg-gray-200 rounded-full h-1.5">
+                            <div
+                              className="bg-violet-500 rounded-full h-1.5 transition-all"
+                              style={{ width: `${planProgress}%` }}
+                            />
+                          </div>
+                        </div>
                       )}
                     </div>
-                    <div className="flex items-center gap-4 mt-1 text-xs text-gray-500 flex-wrap">
-                      {plan.planting_date && (
-                        <span className="flex items-center gap-1">
-                          <Calendar className="w-3 h-3" /> Planted: {plan.planting_date}
-                        </span>
-                      )}
-                      {plan.expected_harvest_date && (
-                        <span className="flex items-center gap-1">
-                          <Sprout className="w-3 h-3" /> Harvest: {plan.expected_harvest_date}
-                        </span>
-                      )}
-                      {plan.location && (
-                        <span className="flex items-center gap-1">
-                          <MapPin className="w-3 h-3" /> {plan.location}
-                        </span>
-                      )}
-                    </div>
-                  </div>
 
-                  <div className="flex items-center gap-2 ml-3 shrink-0">
-                    {plan.status === "active" && (
+                    <div className="flex items-center gap-2 ml-3 shrink-0">
+                      {plan.status === "active" && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-green-600 hover:text-green-700 hover:bg-green-50 text-xs h-7 px-2"
+                          onClick={() => updatePlanStatus(plan.id, "completed")}
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
+                          Complete
+                        </Button>
+                      )}
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="text-green-600 hover:text-green-700 hover:bg-green-50 text-xs h-7 px-2"
-                        onClick={() => updatePlanStatus(plan.id, "completed")}
+                        className="text-gray-500 hover:text-gray-700 h-7 px-2"
+                        onClick={() =>
+                          setExpandedPlanId(expandedPlanId === plan.id ? null : plan.id)
+                        }
                       >
-                        <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
-                        Complete
+                        {expandedPlanId === plan.id ? (
+                          <ChevronUp className="w-4 h-4" />
+                        ) : (
+                          <ChevronDown className="w-4 h-4" />
+                        )}
                       </Button>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-gray-500 hover:text-gray-700 h-7 px-2"
-                      onClick={() =>
-                        setExpandedPlanId(expandedPlanId === plan.id ? null : plan.id)
-                      }
-                    >
-                      {expandedPlanId === plan.id ? (
-                        <ChevronUp className="w-4 h-4" />
-                      ) : (
-                        <ChevronDown className="w-4 h-4" />
-                      )}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-red-400 hover:text-red-600 hover:bg-red-50 h-7 px-2"
-                      onClick={() => deletePlan(plan.id)}
-                      disabled={deletingId === plan.id}
-                    >
-                      {deletingId === plan.id ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <Trash2 className="w-4 h-4" />
-                      )}
-                    </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-red-400 hover:text-red-600 hover:bg-red-50 h-7 px-2"
+                        onClick={() => deletePlan(plan.id)}
+                        disabled={deletingId === plan.id}
+                      >
+                        {deletingId === plan.id ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="w-4 h-4" />
+                        )}
+                      </Button>
+                    </div>
                   </div>
-                </div>
 
-                {expandedPlanId === plan.id && (
-                  <div className="p-4 border-t space-y-4">
-                    {(plan.water_schedule || plan.fertilizer_plan || plan.soil_requirements) && (
-                      <div className="grid md:grid-cols-3 gap-3">
-                        {plan.water_schedule && (
-                          <div className="rounded-lg border border-blue-100 bg-blue-50/60 p-3">
-                            <div className="flex items-center gap-1 mb-1 text-blue-700 font-medium text-xs">
-                              <Droplet className="w-3.5 h-3.5" /> Watering
-                            </div>
-                            <p className="text-xs text-gray-700">{plan.water_schedule}</p>
-                          </div>
-                        )}
-                        {plan.fertilizer_plan && (
-                          <div className="rounded-lg border border-green-100 bg-green-50/60 p-3">
-                            <div className="flex items-center gap-1 mb-1 text-green-700 font-medium text-xs">
-                              <FlaskConical className="w-3.5 h-3.5" /> Fertilizer
-                            </div>
-                            <p className="text-xs text-gray-700">{plan.fertilizer_plan}</p>
-                          </div>
-                        )}
-                        {plan.soil_requirements && (
-                          <div className="rounded-lg border border-amber-100 bg-amber-50/60 p-3">
-                            <div className="flex items-center gap-1 mb-1 text-amber-700 font-medium text-xs">
-                              <Sprout className="w-3.5 h-3.5" /> Soil
-                            </div>
-                            <p className="text-xs text-gray-700">{plan.soil_requirements}</p>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {Array.isArray(plan.timeline) && plan.timeline.length > 0 && (
-                      <div>
-                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                          {plan.timeline.length}-Week Timeline
-                        </p>
-                        <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                          {plan.timeline.map((week) => (
-                            <div key={week.week} className="flex items-start gap-2 text-xs">
-                              <span className="bg-violet-100 text-violet-700 rounded-full w-6 h-6 flex items-center justify-center font-bold shrink-0">
-                                {week.week}
-                              </span>
-                              <div>
-                                <p className="font-medium text-gray-700">{week.stage}</p>
-                                {week.activities?.slice(0, 2).map((act, i) => (
-                                  <p key={act || i} className="text-gray-500 mt-0.5">
-                                    • {act}
-                                  </p>
-                                ))}
-                                {week.activities?.length > 2 && (
-                                  <p className="text-gray-400 mt-0.5">
-                                    +{week.activities.length - 2} more tasks
-                                  </p>
-                                )}
+                  {expandedPlanId === plan.id && (
+                    <div className="p-4 border-t space-y-4">
+                      {(plan.water_schedule || plan.fertilizer_plan || plan.soil_requirements) && (
+                        <div className="grid md:grid-cols-3 gap-3">
+                          {plan.water_schedule && (
+                            <div className="rounded-lg border border-blue-100 bg-blue-50/60 p-3">
+                              <div className="flex items-center gap-1 mb-1 text-blue-700 font-medium text-xs">
+                                <Droplet className="w-3.5 h-3.5" /> Watering
                               </div>
+                              <p className="text-xs text-gray-700">{plan.water_schedule}</p>
                             </div>
-                          ))}
+                          )}
+                          {plan.fertilizer_plan && (
+                            <div className="rounded-lg border border-green-100 bg-green-50/60 p-3">
+                              <div className="flex items-center gap-1 mb-1 text-green-700 font-medium text-xs">
+                                <FlaskConical className="w-3.5 h-3.5" /> Fertilizer
+                              </div>
+                              <p className="text-xs text-gray-700">{plan.fertilizer_plan}</p>
+                            </div>
+                          )}
+                          {plan.soil_requirements && (
+                            <div className="rounded-lg border border-amber-100 bg-amber-50/60 p-3">
+                              <div className="flex items-center gap-1 mb-1 text-amber-700 font-medium text-xs">
+                                <Sprout className="w-3.5 h-3.5" /> Soil
+                              </div>
+                              <p className="text-xs text-gray-700">{plan.soil_requirements}</p>
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))}
+                      )}
+
+                      {Array.isArray(plan.timeline) && plan.timeline.length > 0 && (
+                        <div>
+                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                            {plan.timeline.length}-Week Timeline
+                          </p>
+                          <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                            {plan.timeline.map((week) => {
+                              const isCurr = planCurrentWeek === week.week;
+                              return (
+                                <div key={week.week} className="flex items-start gap-2 text-xs">
+                                  <span
+                                    className={`rounded-full w-6 h-6 flex items-center justify-center font-bold shrink-0 ${
+                                      isCurr
+                                        ? "bg-violet-600 text-white"
+                                        : "bg-violet-100 text-violet-700"
+                                    }`}
+                                  >
+                                    {week.week}
+                                  </span>
+                                  <div>
+                                    <p className={`font-medium ${isCurr ? "text-violet-700" : "text-gray-700"}`}>
+                                      {week.stage}{isCurr ? " 📍" : ""}
+                                    </p>
+                                    {week.activities?.slice(0, 2).map((act, i) => (
+                                      <p key={act || i} className="text-gray-500 mt-0.5">
+                                        • {act}
+                                      </p>
+                                    ))}
+                                    {week.activities?.length > 2 && (
+                                      <p className="text-gray-400 mt-0.5">
+                                        +{week.activities.length - 2} more tasks
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </CardContent>
         </Card>
       )}
