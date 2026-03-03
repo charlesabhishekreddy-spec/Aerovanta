@@ -2,6 +2,12 @@ import { Badge } from "@/components/ui/badge";
 import { MessageCircle, Heart, CheckCircle, User } from "lucide-react";
 import { format } from "date-fns";
 
+const formatPostDate = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown date";
+  return format(date, "MMM d, yyyy");
+};
+
 export default function PostList({ posts }) {
   const getCategoryColor = (category) => {
     const colors = {
@@ -42,7 +48,7 @@ export default function PostList({ posts }) {
               <div className="flex items-center gap-2 mb-1">
                 <h4 className="font-semibold text-gray-900">{post.author_name || 'Anonymous'}</h4>
                 <span className="text-xs text-gray-500">
-                  {format(new Date(post.created_date), 'MMM d, yyyy')}
+                  {formatPostDate(post.created_date)}
                 </span>
                 {post.is_solved && (
                   <Badge className="bg-green-100 text-green-800 ml-auto">

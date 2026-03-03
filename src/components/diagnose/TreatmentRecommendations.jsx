@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { appClient } from "@/api/appClient";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Loader2, Beaker, Leaf, ChevronDown, ChevronUp, RefreshCw, Heart, Star } from "lucide-react";
+import { Loader2, Beaker, Leaf, ChevronDown, ChevronUp, RefreshCw, Heart, Star, ShieldAlert } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 export default function TreatmentRecommendations({ diagnosis }) {
@@ -11,28 +11,37 @@ export default function TreatmentRecommendations({ diagnosis }) {
   const [expandedId, setExpandedId] = useState(null);
   const [savedTreatments, setSavedTreatments] = useState([]);
 
+  const shouldDisableTreatments =
+    diagnosis?.is_healthy ||
+    diagnosis?.requires_manual_review ||
+    !diagnosis?.disease_name ||
+    String(diagnosis?.disease_name || "").toLowerCase().includes("uncertain");
+
   const fetchTreatments = async () => {
+    if (shouldDisableTreatments) {
+      setTreatments([]);
+      setIsLoading(false);
+      return;
+    }
+
     setIsLoading(true);
     try {
-      // First, check if treatments exist in database
       const existingTreatments = await appClient.entities.Treatment.filter({
-        disease_name: diagnosis.disease_name
+        disease_name: diagnosis.disease_name,
       });
 
       if (existingTreatments.length > 0) {
-        // Use stored treatments
-        const formattedTreatments = existingTreatments.map(t => ({
+        const formattedTreatments = existingTreatments.map((t) => ({
           name: t.treatment_name,
           type: t.treatment_type,
           proportions: t.application_method || "See description",
           description: t.description,
           safety_precautions: t.safety_precautions,
           effectiveness_rating: t.effectiveness_rating,
-          id: t.id
+          id: t.id,
         }));
         setTreatments(formattedTreatments);
       } else {
-        // Generate new treatments with AI
         const result = await appClient.integrations.Core.InvokeLLM({
           prompt: `You are an expert plant pathologist. Provide detailed treatment recommendations for:
 
@@ -40,16 +49,14 @@ Plant: ${diagnosis.plant_name}
 Disease: ${diagnosis.disease_name}
 Infection Level: ${diagnosis.infection_level || diagnosis.confidence_score}%
 
-Provide exactly 4 treatment options - 2 chemical and 2 organic treatments.
+Provide exactly 4 treatment options: 2 chemical and 2 organic.
 For each treatment provide:
-1. Treatment name (include brand examples for chemicals)
+1. Treatment name
 2. Type (chemical or organic)
-3. Application method and proportions - exact mixing ratios and quantities
-4. Description - detailed application instructions, frequency, best timing, and how it works
+3. Application method and proportions
+4. Description
 5. Safety precautions (array)
-6. Effectiveness rating (1-5)
-
-Be specific and practical.`,
+6. Effectiveness rating (1-5)`,
           response_json_schema: {
             type: "object",
             properties: {
@@ -63,16 +70,15 @@ Be specific and practical.`,
                     proportions: { type: "string" },
                     description: { type: "string" },
                     safety_precautions: { type: "array", items: { type: "string" } },
-                    effectiveness_rating: { type: "number" }
-                  }
-                }
-              }
-            }
-          }
+                    effectiveness_rating: { type: "number" },
+                  },
+                },
+              },
+            },
+          },
         });
 
-        // Auto-save treatments to database
-        const savedTreatments = [];
+        const newlySavedTreatments = [];
         for (const treatment of result.treatments || []) {
           const saved = await appClient.entities.Treatment.create({
             disease_name: diagnosis.disease_name,
@@ -82,25 +88,24 @@ Be specific and practical.`,
             application_method: treatment.proportions,
             safety_precautions: treatment.safety_precautions,
             effectiveness_rating: treatment.effectiveness_rating,
-            is_favorite: false
+            is_favorite: false,
           });
-          savedTreatments.push({ ...treatment, id: saved.id });
+          newlySavedTreatments.push({ ...treatment, id: saved.id });
         }
 
-        setTreatments(savedTreatments);
+        setTreatments(newlySavedTreatments);
       }
-    } catch (error) {
-      console.error("Failed to fetch treatments:", error);
+    } catch (fetchError) {
+      console.error("Failed to fetch treatments:", fetchError);
+      setTreatments([]);
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    if (diagnosis.disease_name) {
-      fetchTreatments();
-    }
-  }, [diagnosis]);
+    fetchTreatments();
+  }, [diagnosis?.disease_name, diagnosis?.requires_manual_review, diagnosis?.is_healthy]);
 
   const toggleExpand = (index) => {
     setExpandedId(expandedId === index ? null : index);
@@ -119,54 +124,67 @@ Be specific and practical.`,
           application_method: treatment.proportions,
           safety_precautions: treatment.safety_precautions,
           effectiveness_rating: treatment.effectiveness_rating,
-          is_favorite: true
+          is_favorite: true,
         });
       }
       setSavedTreatments([...savedTreatments, treatment.name]);
-    } catch (error) {
-      console.error("Failed to save treatment:", error);
+    } catch (saveError) {
+      console.error("Failed to save treatment:", saveError);
     }
   };
 
-  const getTypeIcon = (type) => {
-    return type === "chemical" ? Beaker : Leaf;
-  };
+  const getTypeIcon = (type) => (type === "chemical" ? Beaker : Leaf);
 
-  const getTypeStyle = (type) => {
-    return type === "chemical" 
-      ? "text-indigo-700" 
-      : "text-violet-700";
-  };
+  const getTypeStyle = (type) => (type === "chemical" ? "text-indigo-700" : "text-violet-700");
 
   if (isLoading) {
     return (
-      <Card className="border-none shadow-lg">
+      <Card className="h-full rounded-3xl border border-white/70 bg-white/75 shadow-xl backdrop-blur-sm">
         <CardContent className="p-8 text-center">
-          <Loader2 className="w-8 h-8 animate-spin text-violet-600 mx-auto mb-4" />
+          <Loader2 className="mx-auto mb-4 h-8 w-8 animate-spin text-violet-600" />
           <p className="text-gray-600">Generating treatment recommendations...</p>
         </CardContent>
       </Card>
     );
   }
 
+  if (shouldDisableTreatments) {
+    return (
+      <Card className="h-full rounded-3xl border border-white/70 bg-white/75 shadow-xl backdrop-blur-sm">
+        <CardContent className="p-0">
+          <div className="flex items-center justify-between border-b bg-gradient-to-r from-violet-50/90 to-white p-4">
+            <h2 className="text-xl font-bold text-gray-900">Treatment Suggestions</h2>
+          </div>
+          <div className="p-6">
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+              <div className="mb-2 flex items-center gap-2 font-semibold">
+                <ShieldAlert className="h-4 w-4" />
+                Treatments paused
+              </div>
+              Recommendations are hidden until diagnosis confidence is verified and disease evidence is clear.
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
-    <Card className="border-none shadow-lg overflow-hidden">
+    <Card className="h-full overflow-hidden rounded-3xl border border-white/70 bg-white/75 shadow-xl backdrop-blur-sm">
       <CardContent className="p-0">
-        {/* Header */}
-        <div className="flex items-center justify-between border-b bg-violet-50/70 p-4">
+        <div className="flex items-center justify-between border-b bg-gradient-to-r from-violet-50/90 to-white p-4">
           <h2 className="text-xl font-bold text-gray-900">Treatment Suggestions</h2>
-          <Button 
-            variant="ghost" 
-            size="sm" 
-            onClick={fetchTreatments}
-            className="gap-2"
-          >
-            <RefreshCw className="w-4 h-4" />
+          <Button variant="ghost" size="sm" onClick={fetchTreatments} className="gap-2">
+            <RefreshCw className="h-4 w-4" />
             Refetch Treatments
           </Button>
         </div>
 
-        <div className="divide-y">
+        <div className="max-h-[42rem] divide-y overflow-y-auto">
+          {treatments.length === 0 && (
+            <div className="p-6 text-sm text-gray-600">No treatments are available for this diagnosis yet.</div>
+          )}
+
           {treatments.map((treatment, index) => {
             const Icon = getTypeIcon(treatment.type);
             const isExpanded = expandedId === index;
@@ -175,54 +193,44 @@ Be specific and practical.`,
             return (
               <Collapsible key={index} open={isExpanded} onOpenChange={() => toggleExpand(index)}>
                 <CollapsibleTrigger className="w-full">
-                    <div className="flex items-center justify-between p-4 transition-colors hover:bg-violet-50/50">
+                  <div className="flex items-center justify-between p-4 text-left transition-colors hover:bg-violet-50/50">
                     <div className="flex items-center gap-3">
-                      <Icon className={`w-5 h-5 ${getTypeStyle(treatment.type)}`} />
+                      <Icon className={`h-5 w-5 ${getTypeStyle(treatment.type)}`} />
                       <span className="font-medium text-gray-900">
-                        <span className={`${getTypeStyle(treatment.type)} capitalize`}>
-                          {treatment.type}:
-                        </span>{" "}
-                        {treatment.name}
+                        <span className={`${getTypeStyle(treatment.type)} capitalize`}>{treatment.type}:</span> {treatment.name}
                       </span>
                     </div>
                     {isExpanded ? (
-                      <ChevronUp className="w-5 h-5 text-gray-400" />
+                      <ChevronUp className="h-5 w-5 text-gray-400" />
                     ) : (
-                      <ChevronDown className="w-5 h-5 text-gray-400" />
+                      <ChevronDown className="h-5 w-5 text-gray-400" />
                     )}
                   </div>
                 </CollapsibleTrigger>
 
                 <CollapsibleContent>
                   <div className="space-y-4 bg-violet-50/40 px-4 pb-4">
-                    {/* Application Method */}
                     <div>
-                      <h4 className="font-semibold text-gray-900 mb-1">Application Method</h4>
-                      <p className="text-gray-700 text-sm">{treatment.proportions}</p>
+                      <h4 className="mb-1 font-semibold text-gray-900">Application Method</h4>
+                      <p className="text-sm text-gray-700">{treatment.proportions}</p>
                     </div>
 
-                    {/* Description */}
                     <div>
-                      <h4 className="font-semibold text-gray-900 mb-1">Description</h4>
-                      <p className="text-gray-700 text-sm leading-relaxed">{treatment.description}</p>
+                      <h4 className="mb-1 font-semibold text-gray-900">Description</h4>
+                      <p className="text-sm leading-relaxed text-gray-700">{treatment.description}</p>
                     </div>
 
-                    {/* Safety Precautions */}
                     {treatment.safety_precautions && treatment.safety_precautions.length > 0 && (
                       <div>
-                        <h4 className="font-semibold text-gray-900 mb-1">Safety Precautions</h4>
-                        <ul className="text-gray-700 text-sm space-y-1">
+                        <h4 className="mb-1 font-semibold text-gray-900">Safety Precautions</h4>
+                        <ul className="space-y-1 text-sm text-gray-700">
                           {treatment.safety_precautions.map((precaution, idx) => (
-                            <li key={idx} className="flex items-start gap-2">
-                              <span className="text-red-500 mt-0.5">⚠</span>
-                              {precaution}
-                            </li>
+                            <li key={idx}>- {precaution}</li>
                           ))}
                         </ul>
                       </div>
                     )}
 
-                    {/* Effectiveness Rating */}
                     {treatment.effectiveness_rating && (
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-semibold text-gray-700">Effectiveness:</span>
@@ -230,10 +238,8 @@ Be specific and practical.`,
                           {[1, 2, 3, 4, 5].map((star) => (
                             <Star
                               key={star}
-                              className={`w-4 h-4 ${
-                                star <= treatment.effectiveness_rating
-                                  ? "fill-yellow-400 text-yellow-400"
-                                  : "text-gray-300"
+                              className={`h-4 w-4 ${
+                                star <= treatment.effectiveness_rating ? "fill-yellow-400 text-yellow-400" : "text-gray-300"
                               }`}
                             />
                           ))}
@@ -241,7 +247,6 @@ Be specific and practical.`,
                       </div>
                     )}
 
-                    {/* Save to Wishlist */}
                     {treatment.id && (
                       <Button
                         variant="outline"
@@ -253,8 +258,8 @@ Be specific and practical.`,
                         disabled={isSaved}
                         className="gap-2"
                       >
-                        <Heart className={`w-4 h-4 ${isSaved ? 'fill-red-500 text-red-500' : ''}`} />
-                        {isSaved ? 'Saved to Wishlist' : 'Save to Wishlist'}
+                        <Heart className={`h-4 w-4 ${isSaved ? "fill-red-500 text-red-500" : ""}`} />
+                        {isSaved ? "Saved to Wishlist" : "Save to Wishlist"}
                       </Button>
                     )}
                   </div>

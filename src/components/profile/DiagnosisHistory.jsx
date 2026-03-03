@@ -7,6 +7,12 @@ import { Badge } from "@/components/ui/badge";
 import { Leaf, X } from "lucide-react";
 import { format } from "date-fns";
 
+const formatDiagnosisDate = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown date";
+  return format(date, "MMM d, yyyy");
+};
+
 export default function DiagnosisHistory({ diagnoses }) {
   const [expandedId, setExpandedId] = useState(null);
   const queryClient = useQueryClient();
@@ -97,7 +103,7 @@ export default function DiagnosisHistory({ diagnoses }) {
                 <div className="flex items-center gap-2">
                   <div className="text-right mr-4">
                     <p className="text-xs text-gray-500">
-                      {format(new Date(diagnosis.created_date), 'MMM d, yyyy')}
+                      {formatDiagnosisDate(diagnosis.created_date)}
                     </p>
                     <p className="text-xs text-gray-500">
                       {diagnosis.confidence_score}% confidence

@@ -3,8 +3,9 @@ import { appClient } from "@/api/appClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Lightbulb, Droplets, Bug, Sprout, Calendar, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { getBrowserLocation } from "@/lib/browserLocation";
 
-export default function WeatherRecommendations() {
+export default function WeatherRecommendations({ className = "" }) {
   const [recommendations, setRecommendations] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -12,17 +13,27 @@ export default function WeatherRecommendations() {
     const fetchRecommendations = async () => {
       try {
         const user = await appClient.auth.me();
-        const location = user?.location || "current location";
+        const profileLocation = String(user?.location || "").trim();
         const crops = user?.primary_crops || [];
         const farmingMethod = user?.farming_method || "conventional";
+        const browserLocation = await getBrowserLocation();
+        const locationLabel = browserLocation
+          ? `${browserLocation.latitude.toFixed(4)}, ${browserLocation.longitude.toFixed(4)}`
+          : profileLocation || "Des Moines, Iowa, United States";
+        const coordinateContext = browserLocation
+          ? `Use these exact coordinates:
+Latitude: ${browserLocation.latitude}
+Longitude: ${browserLocation.longitude}`
+          : `Use this location name: ${locationLabel}`;
 
         const result = await appClient.integrations.Core.InvokeLLM({
-          prompt: `Based on real-time weather conditions for ${location}, provide AI-driven farming recommendations.
+          prompt: `Based on real-time weather conditions, provide AI-driven farming recommendations.
 
 USER CONTEXT:
-- Location: ${location}
+- Location: ${locationLabel}
 - Primary Crops: ${crops.join(', ') || 'various crops'}
 - Farming Method: ${farmingMethod}
+${coordinateContext}
 
 Analyze current and upcoming weather to provide:
 1. Irrigation recommendations (timing, amount, method)
@@ -109,7 +120,7 @@ Be specific and actionable. Consider real-time weather patterns.`,
 
   if (isLoading) {
     return (
-      <Card className="border-none shadow-lg">
+      <Card className={`border-none shadow-lg rounded-3xl ${className}`.trim()}>
         <CardContent className="p-8 text-center">
           <Loader2 className="w-8 h-8 animate-spin text-violet-600 mx-auto mb-4" />
           <p className="text-gray-600">Generating AI recommendations...</p>
@@ -121,14 +132,14 @@ Be specific and actionable. Consider real-time weather patterns.`,
   if (!recommendations) return null;
 
   return (
-    <Card className="border-none shadow-lg">
+    <Card className={`border-none shadow-lg rounded-3xl flex h-full flex-col overflow-hidden ${className}`.trim()}>
       <CardHeader className="border-b bg-violet-50/70">
         <CardTitle className="flex items-center gap-2">
           <Lightbulb className="w-5 h-5 text-violet-600" />
           AI Weather Recommendations
         </CardTitle>
       </CardHeader>
-      <CardContent className="p-6 space-y-6">
+      <CardContent className="flex-1 overflow-y-auto p-6 space-y-6 pr-3">
         {/* Irrigation */}
         {recommendations.irrigation && (
           <div className="space-y-2">

@@ -6,6 +6,12 @@ import { Badge } from "@/components/ui/badge";
 import { MapPin, CheckCircle, AlertTriangle, Clock } from "lucide-react";
 import { format } from "date-fns";
 
+const formatReportDate = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown";
+  return format(date, "MMM d");
+};
+
 export default function OutbreakList({ reports }) {
   const queryClient = useQueryClient();
 
@@ -65,7 +71,7 @@ export default function OutbreakList({ reports }) {
                   </span>
                   <span className="flex items-center gap-1">
                     <Clock className="w-3 h-3" />
-                    {format(new Date(report.created_date), 'MMM d')}
+                    {formatReportDate(report.created_date)}
                   </span>
                 </div>
                 {report.affected_crops?.length > 0 && (

@@ -1,60 +1,54 @@
-# React + Vite
+# Verdent Vision
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Enterprise-style agriculture operations app with a React frontend and a secured Node API backend.
 
-Currently, two official plugins are available:
+## Architecture
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- `src/`: React + Vite frontend
+- `server/`: Node API (no framework dependency) with:
+  - cookie-based sessions (`HttpOnly`)
+  - CSRF protection (`X-CSRF-Token`)
+  - auth controls (PBKDF2 password hashing, login throttling, reset tokens, session revocation)
+  - rate limiting (general/auth/LLM buckets)
+  - strict security headers and CORS allowlist
+  - JSON file database with atomic writes (`server/data/db.json`)
+  - secure upload endpoint + protected `/uploads/*` access
 
-## React Compiler
+## Quick Start
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
-
-## Git push troubleshooting ("src refspec <branch> does not match any")
-
-If you see an error like this:
-
-```text
-error: src refspec work does not match any
-```
-
-it means the local branch name in the command does not exist in your clone.
-
-### 1) Check your current branch
+1. Copy `.env.example` to `.env` and fill the values.
+2. Start the API:
 
 ```bash
-git branch --show-current
+npm run api
 ```
 
-### 2) Push the branch you are actually on
-
-If the command above prints `main`, run:
+3. Start the frontend:
 
 ```bash
-git push -u origin main
+npm run dev
 ```
 
-If you really need a `work` branch, create it first and then push:
+Default local URLs:
+- Frontend: `http://localhost:5173`
+- API: `http://127.0.0.1:5000/api/v1`
 
-```bash
-git checkout -b work
-git push -u origin work
-```
+Vite proxies `/api` and `/uploads` to the API server by default.
 
-### 3) Verify remote URL
+## Security Notes
 
-```bash
-git remote -v
-```
+- For production, terminate TLS at a reverse proxy and set:
+  - `FORCE_HTTPS=true`
+  - `SESSION_COOKIE_SECURE=true`
+  - strict `CORS_ORIGINS`
+- `ADMIN_BOOTSTRAP_PASSWORD` is optional and only used if the seeded admin account has no password yet.
+- Social login currently accepts provider profile payload in development mode (`ALLOW_SOCIAL_PROFILE_ONLY=true`).
+  - Disable this in production and enforce verified provider tokens.
 
-Expected:
+## Scripts
 
-```text
-origin  https://github.com/charlesabhishekreddy-spec/VerdentVisionFinal.git (fetch)
-origin  https://github.com/charlesabhishekreddy-spec/VerdentVisionFinal.git (push)
-```
+- `npm run dev` - start Vite frontend
+- `npm run api` - start API server
+- `npm run api:dev` - start API with Node watch mode
+- `npm run lint` - run ESLint
+- `npm run build` - build frontend

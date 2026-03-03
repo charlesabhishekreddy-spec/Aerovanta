@@ -2,23 +2,39 @@ import React, { useState, useEffect } from "react";
 import { appClient } from "@/api/appClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { CloudRain, Wind, Droplets, Thermometer, AlertTriangle, RefreshCw, Loader2, Sun, Cloud, CloudDrizzle, CloudSnow } from "lucide-react";
+import { CloudRain, Wind, Droplets, Thermometer, AlertTriangle, RefreshCw, Loader2, Sun, Cloud, CloudDrizzle, CloudSnow, MapPin } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { getBrowserLocation } from "@/lib/browserLocation";
 
-export default function WeatherDashboard({ compact = false }) {
+export default function WeatherDashboard({ compact = false, className = "" }) {
   const [weatherData, setWeatherData] = useState(null);
   const [forecast, setForecast] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [locationSource, setLocationSource] = useState("default");
 
-  const fetchWeather = async () => {
+  const fetchWeather = async ({ forceRefreshLocation = false } = {}) => {
     setIsLoading(true);
     try {
       const user = await appClient.auth.me();
-      const location = user?.location || "current location";
+      const profileLocation = String(user?.location || "").trim();
+      const browserLocation = await getBrowserLocation({ forceRefresh: forceRefreshLocation });
+      const source = browserLocation ? "gps" : profileLocation ? "profile" : "default";
+      setLocationSource(source);
+      const locationLabel = browserLocation
+        ? `${browserLocation.latitude.toFixed(4)}, ${browserLocation.longitude.toFixed(4)}`
+        : profileLocation || "Des Moines, Iowa, United States";
+      const coordinateContext = browserLocation
+        ? `Use these exact coordinates as primary source:
+Latitude: ${browserLocation.latitude}
+Longitude: ${browserLocation.longitude}`
+        : `Use this location name as primary source: ${locationLabel}`;
 
       const result = await appClient.integrations.Core.InvokeLLM({
-        prompt: `Get REAL-TIME weather data for ${location}. Use current internet data sources.
+        prompt: `Get REAL-TIME weather data for this farm. Use current internet data sources.
+
+Location: ${locationLabel}
+${coordinateContext}
 
 Provide:
 1. Current conditions (temperature, humidity, wind speed, conditions, "feels like" temp)
@@ -96,6 +112,8 @@ Use actual real-time weather data from reliable sources.`,
         await appClient.entities.WeatherLog.create({
           date: new Date().toISOString().split('T')[0],
           location: result.current.location,
+          latitude: browserLocation?.latitude ?? null,
+          longitude: browserLocation?.longitude ?? null,
           temperature_high: result.current.temperature,
           temperature_low: result.current.temperature - 5,
           humidity: result.current.humidity,
@@ -136,7 +154,7 @@ Use actual real-time weather data from reliable sources.`,
 
   if (isLoading) {
     return (
-      <Card className="border-none shadow-lg">
+      <Card className={`border-none shadow-lg rounded-3xl ${className}`.trim()}>
         <CardContent className="p-8 text-center">
           <Loader2 className="w-8 h-8 animate-spin text-violet-600 mx-auto mb-4" />
           <p className="text-gray-600">Fetching real-time weather...</p>
@@ -148,7 +166,7 @@ Use actual real-time weather data from reliable sources.`,
   if (compact && weatherData) {
     const Icon = getWeatherIcon(weatherData.conditions);
     return (
-      <Card className="border-none shadow-lg overflow-hidden">
+      <Card className={`border-none shadow-lg overflow-hidden rounded-3xl ${className}`.trim()}>
         <div className="bg-gradient-to-br from-violet-500 to-purple-600 p-4 text-white">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -156,11 +174,25 @@ Use actual real-time weather data from reliable sources.`,
               <div>
                 <p className="text-3xl font-bold">{Math.round(weatherData.temperature)}°F</p>
                 <p className="text-blue-100 text-sm">{weatherData.conditions}</p>
+                {locationSource !== "gps" && (
+                  <p className="text-xs text-blue-100">Using fallback location</p>
+                )}
               </div>
             </div>
-            <Button variant="ghost" size="sm" onClick={fetchWeather} className="text-white">
-              <RefreshCw className="w-4 h-4" />
-            </Button>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => fetchWeather({ forceRefreshLocation: true })}
+                className="text-white"
+                title="Use my live location"
+              >
+                <MapPin className="w-4 h-4" />
+              </Button>
+              <Button variant="ghost" size="sm" onClick={fetchWeather} className="text-white" title="Refresh weather">
+                <RefreshCw className="w-4 h-4" />
+              </Button>
+            </div>
           </div>
           <div className="grid grid-cols-3 gap-2 mt-3 text-sm">
             <div className="flex items-center gap-1">
@@ -190,16 +222,26 @@ Use actual real-time weather data from reliable sources.`,
   }
 
   return (
-    <Card className="border-none shadow-lg overflow-hidden">
+    <Card className={`border-none shadow-lg overflow-hidden rounded-3xl ${className}`.trim()}>
       <CardHeader className="border-b bg-violet-50/70">
         <div className="flex items-center justify-between">
           <CardTitle className="flex items-center gap-2">
             <CloudRain className="w-5 h-5 text-violet-600" />
             Weather Forecast
           </CardTitle>
-          <Button variant="ghost" size="sm" onClick={fetchWeather}>
-            <RefreshCw className="w-4 h-4" />
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => fetchWeather({ forceRefreshLocation: true })}
+              title="Use my live location"
+            >
+              <MapPin className="w-4 h-4" />
+            </Button>
+            <Button variant="ghost" size="sm" onClick={fetchWeather} title="Refresh weather">
+              <RefreshCw className="w-4 h-4" />
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="p-0">
@@ -207,6 +249,11 @@ Use actual real-time weather data from reliable sources.`,
         {weatherData && (
           <div className="bg-gradient-to-br from-violet-500 to-purple-600 p-6 text-white">
             <p className="text-blue-100 mb-2">{weatherData.location}</p>
+            {locationSource !== "gps" && (
+              <p className="mb-2 text-xs text-blue-100">
+                Live GPS not available. Showing {locationSource === "profile" ? "profile location" : "default location"}.
+              </p>
+            )}
             <div className="flex items-center gap-4 mb-4">
               {React.createElement(getWeatherIcon(weatherData.conditions), { className: "w-16 h-16" })}
               <div>
@@ -215,7 +262,7 @@ Use actual real-time weather data from reliable sources.`,
                 <p className="text-blue-100 text-sm">Feels like {Math.round(weatherData.feels_like)}°F</p>
               </div>
             </div>
-            <div className="grid grid-cols-4 gap-4 text-sm">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
               <div>
                 <p className="text-blue-100">Humidity</p>
                 <p className="text-lg font-semibold">{weatherData.humidity}%</p>
@@ -264,7 +311,7 @@ Use actual real-time weather data from reliable sources.`,
         {forecast.length > 0 && (
           <div className="p-6">
             <h3 className="font-bold text-gray-900 mb-3">7-Day Forecast</h3>
-            <div className="grid grid-cols-7 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
               {forecast.map((day, idx) => {
                 const Icon = getWeatherIcon(day.conditions);
                 return (

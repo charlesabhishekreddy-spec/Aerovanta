@@ -68,30 +68,30 @@ Be precise and use real current data.`,
     }
   };
 
-  useEffect(() => {
-    const getLocation = () => {
-      setIsLoading(true);
-      setError(null);
+  const getLocation = () => {
+    setIsLoading(true);
+    setError(null);
 
-      if (!navigator.geolocation) {
-        setError("Geolocation is not supported by your browser");
+    if (!navigator.geolocation) {
+      setError("Geolocation is not supported by your browser");
+      setIsLoading(false);
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        fetchWeather(latitude, longitude);
+      },
+      () => {
+        setError("Unable to get your location. Please enable location services.");
         setIsLoading(false);
-        return;
-      }
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
 
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const { latitude, longitude } = position.coords;
-          fetchWeather(latitude, longitude);
-        },
-        (_err) => {
-          setError("Unable to get your location. Please enable location services.");
-          setIsLoading(false);
-        },
-        { enableHighAccuracy: true, timeout: 10000 }
-      );
-    };
-
+  useEffect(() => {
     getLocation();
   }, []);
 

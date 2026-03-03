@@ -3,6 +3,16 @@ import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Toolti
 import { TrendingUp, AlertCircle, CheckCircle, Clock } from "lucide-react";
 import { format, isBefore } from "date-fns";
 
+const parseDateSafe = (value) => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const formatDateSafe = (value) => {
+  const date = parseDateSafe(value);
+  return date ? format(date, "MMM d, yyyy") : "No due date";
+};
+
 export default function TaskReports({ tasks }) {
   const today = new Date();
 
@@ -34,7 +44,8 @@ export default function TaskReports({ tasks }) {
   const overdueTasks = tasks.filter(t => 
     t.status !== 'completed' && 
     t.status !== 'skipped' && 
-    isBefore(new Date(t.due_date), today)
+    parseDateSafe(t.due_date) &&
+    isBefore(parseDateSafe(t.due_date), today)
   );
 
   // Completion Rate
@@ -214,7 +225,7 @@ export default function TaskReports({ tasks }) {
                   <div>
                     <p className="font-semibold text-gray-900">{task.title}</p>
                     <p className="text-sm text-gray-600">
-                      Due: {format(new Date(task.due_date), 'MMM d, yyyy')} 
+                      Due: {formatDateSafe(task.due_date)} 
                       {task.assigned_to && ` • Assigned to: ${task.assigned_to}`}
                     </p>
                   </div>

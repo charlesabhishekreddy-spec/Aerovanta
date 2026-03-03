@@ -24,3 +24,11 @@ dist-ssr
 *.sw?
 # Optional npm cache directory
 .npm 
+
+# Environment and server runtime state
+.env
+.env.*
+!.env.example
+server/data/db.json
+server/uploads/*
+!server/uploads/.gitkeep

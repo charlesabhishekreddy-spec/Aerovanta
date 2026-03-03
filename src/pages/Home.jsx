@@ -13,6 +13,13 @@ import { format } from "date-fns";
 import WeatherDashboard from "../components/weather/WeatherDashboard";
 import WeatherRecommendations from "../components/weather/WeatherRecommendations";
 
+const formatDueDate = (value) => {
+  if (!value) return "No due date";
+  const parsedDate = new Date(value);
+  if (Number.isNaN(parsedDate.getTime())) return "No due date";
+  return format(parsedDate, "MMM d, yyyy");
+};
+
 export default function Home() {
   const [user, setUser] = useState(null);
 
@@ -106,12 +113,14 @@ export default function Home() {
       </div>
 
       {/* Real-Time Weather & Recommendations */}
-      <div className="grid lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
-          <WeatherDashboard />
-        </div>
-        <div>
-          <WeatherRecommendations />
+      <div className="glass-panel p-4 sm:p-5 lg:p-6">
+        <div className="grid gap-4 lg:grid-cols-3 items-stretch">
+          <div className="lg:col-span-2 lg:h-[760px]">
+            <WeatherDashboard className="h-full" />
+          </div>
+          <div className="lg:h-[760px]">
+            <WeatherRecommendations className="h-full" />
+          </div>
         </div>
       </div>
 
@@ -210,7 +219,7 @@ export default function Home() {
                 <div className="flex-1">
                   <p className="font-medium text-gray-900">{task.title}</p>
                   <p className="text-sm text-gray-600">
-                    {format(new Date(task.due_date), "MMM d, yyyy")}
+                    {formatDueDate(task.due_date)}
                   </p>
                 </div>
                 <div className={`px-3 py-1 rounded-full text-xs font-medium ${

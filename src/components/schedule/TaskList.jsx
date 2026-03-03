@@ -13,6 +13,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { format } from "date-fns";
 
+const formatDueDate = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "No due date";
+  return format(date, "MMM d, yyyy");
+};
+
 export default function TaskList({ tasks, onEdit, onDelete, onStatusChange }) {
   const getTaskIcon = (type) => {
     const icons = {
@@ -95,7 +101,7 @@ export default function TaskList({ tasks, onEdit, onDelete, onStatusChange }) {
               <div className="flex items-center gap-3 text-xs text-gray-500 flex-wrap">
                 {task.crop_name && <span>🌱 {task.crop_name}</span>}
                 {task.location && <span>📍 {task.location}</span>}
-                <span>📅 {format(new Date(task.due_date), 'MMM d, yyyy')}</span>
+                <span>📅 {formatDueDate(task.due_date)}</span>
                 {task.assigned_to && (
                   <span className="flex items-center gap-1 bg-purple-100 text-purple-700 px-2 py-0.5 rounded">
                     <User className="w-3 h-3" />

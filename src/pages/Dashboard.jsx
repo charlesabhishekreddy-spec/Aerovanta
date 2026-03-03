@@ -6,6 +6,12 @@ import { Button } from "@/components/ui/button";
 import { Activity, Download, FileText } from "lucide-react";
 import { format } from "date-fns";
 
+const formatSafe = (value, pattern, fallback = "") => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return fallback;
+  return format(date, pattern);
+};
+
 export default function Dashboard() {
   const [exporting, setExporting] = useState(false);
 
@@ -19,7 +25,7 @@ export default function Dashboard() {
     try {
       const headers = ['Date', 'Plant Name', 'Disease', 'Severity', 'Confidence', 'Status'];
       const rows = diagnoses.map((d) => [
-        format(new Date(d.created_date || new Date()), 'yyyy-MM-dd HH:mm'),
+        formatSafe(d.created_date, 'yyyy-MM-dd HH:mm', format(new Date(), 'yyyy-MM-dd HH:mm')),
         d.plant_name || '',
         d.disease_name || '',
         d.severity || '',
@@ -80,7 +86,7 @@ export default function Dashboard() {
                     <p className="text-sm text-slate-600">{d.disease_name || 'No disease data'}</p>
                   </div>
                   <div className="text-right">
-                    <p className="text-sm text-slate-700">{format(new Date(d.created_date || new Date()), 'MMM d, yyyy')}</p>
+                    <p className="text-sm text-slate-700">{formatSafe(d.created_date, 'MMM d, yyyy', "Unknown date")}</p>
                     <p className="text-xs uppercase tracking-wide text-slate-500">{d.severity || 'low'}</p>
                   </div>
                 </div>
