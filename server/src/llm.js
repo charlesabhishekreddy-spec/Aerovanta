@@ -3,6 +3,8 @@ import path from "node:path";
 import { readFile } from "node:fs/promises";
 
 const DEFAULT_LOCATION = "Des Moines, Iowa, United States";
+const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
+const DEFAULT_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
 const CODE = {
   0: "Clear",
   1: "Mostly clear",
@@ -38,9 +40,12 @@ const i = (v, d = 0) => {
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const iso = (d) => new Date(d).toISOString().slice(0, 10);
 const safePrompt = (v) => String(v || "").slice(0, 12000);
+const normalizeKey = (v) => String(v || "").trim().toLowerCase();
 const obj = (v) => (v && typeof v === "object" && !Array.isArray(v) ? v : null);
 const getKeys = (s) => Object.keys(s?.properties || {});
 const enumPick = (s, fallback) => (Array.isArray(s?.enum) && s.enum.length ? s.enum[0] : fallback);
+const isPlaceholderSecret = (value) =>
+  ["", "your_real_key", "changeme", "replace_me"].includes(normalizeKey(value));
 
 const j = async (url, timeout = 9000, headers = { Accept: "application/json" }) => {
   const c = new AbortController();
@@ -235,42 +240,187 @@ const timeline = (p) => {
   };
 };
 
-const treatments = () => ({
-  treatments: [
-    {
-      name: "Neem + Potassium Soap Spray",
-      type: "organic",
-      proportions: "25 ml neem oil + 10 ml soap per gallon",
-      description: "Apply full-canopy coverage every 5-7 days in low-wind windows.",
-      safety_precautions: ["Wear gloves", "Avoid midday spray"],
-      effectiveness_rating: 4,
-    },
-    {
-      name: "Bacillus Biofungicide",
-      type: "organic",
-      proportions: "2 tbsp per gallon",
-      description: "Preventive biological suppression; repeat weekly and after heavy rain.",
-      safety_precautions: ["Use clean sprayer", "Follow product label"],
-      effectiveness_rating: 4,
-    },
-    {
-      name: "Copper Protectant",
-      type: "chemical",
-      proportions: "1.5-2 tsp per gallon",
-      description: "Protective foliar treatment for fungal pressure periods.",
-      safety_precautions: ["Respect REI/PHI", "Avoid over-application"],
-      effectiveness_rating: 4,
-    },
-    {
-      name: "Systemic Rotation Spray",
-      type: "chemical",
-      proportions: "Label rate by growth stage",
-      description: "Rotate active groups every 10-14 days to reduce resistance pressure.",
-      safety_precautions: ["Use PPE", "Observe resistance-management labels"],
-      effectiveness_rating: 5,
-    },
-  ],
-});
+const parseTreatmentContext = (prompt = "") => {
+  const plant = prompt.match(/Plant:\s*([^\n]+)/i)?.[1]?.trim() || "";
+  const disease = prompt.match(/Disease:\s*([^\n]+)/i)?.[1]?.trim() || "";
+  return { plant, disease };
+};
+
+const genericTreatmentSet = () => [
+  {
+    name: "Copper Protectant Program",
+    type: "chemical",
+    proportions: "Use label rate for your crop stage and sprayer volume.",
+    frequency: "Repeat every 7-10 days under wet/high-risk conditions.",
+    description: "Protective program to reduce spread pressure on new tissue.",
+    safety_precautions: ["Use PPE", "Observe REI/PHI", "Do not over-apply copper"],
+    effectiveness_rating: 4,
+  },
+  {
+    name: "Targeted Systemic Rotation",
+    type: "chemical",
+    proportions: "Use crop-labeled active ingredients only; rotate FRAC groups.",
+    frequency: "Rotate every 10-14 days, shorter in high pressure.",
+    description: "Rotation strategy to maintain efficacy and slow resistance buildup.",
+    safety_precautions: ["Follow label and local regulations", "Avoid repeated same MOA"],
+    effectiveness_rating: 5,
+  },
+  {
+    name: "Bacillus-Based Biofungicide",
+    type: "organic",
+    proportions: "Apply per label rate with full canopy coverage.",
+    frequency: "Apply weekly and after heavy rain events.",
+    description: "Biological suppression suitable as a low-risk first line.",
+    safety_precautions: ["Use clean water and calibrated sprayer"],
+    effectiveness_rating: 4,
+  },
+  {
+    name: "Sanitation + Canopy Management",
+    type: "organic",
+    proportions: "Remove infected tissue and improve airflow by pruning.",
+    frequency: "Scout twice weekly during active disease window.",
+    description: "Reduces inoculum and humidity, improving treatment performance.",
+    safety_precautions: ["Disinfect tools between trees/blocks"],
+    effectiveness_rating: 4,
+  },
+];
+
+const diseaseSpecificTreatmentSet = (plantName, diseaseName) => {
+  const plant = normalizeKey(plantName);
+  const disease = normalizeKey(diseaseName);
+
+  if (disease.includes("cedar") && disease.includes("rust")) {
+    return [
+      {
+        name: "Myclobutanil (FRAC 3) Rust Program",
+        type: "chemical",
+        proportions: "Use labeled orchard rate for apple rust control.",
+        frequency: "Apply from pink through early cover at 7-10 day intervals when wet weather persists.",
+        description: "Highly targeted rust-active program for cedar-apple rust on apple.",
+        safety_precautions: ["Follow PHI/REI", "Rotate with non-FRAC 3 partner"],
+        effectiveness_rating: 5,
+      },
+      {
+        name: "Mancozeb Protective Cover",
+        type: "chemical",
+        proportions: "Use crop-labeled protective rate with full canopy coverage.",
+        frequency: "Reapply every 7 days during infection windows or after heavy rain.",
+        description: "Protective shield for new leaves/fruit where rust pressure is high.",
+        safety_precautions: ["Observe seasonal maximum and label limits"],
+        effectiveness_rating: 4,
+      },
+      {
+        name: "Juniper Host Sanitation",
+        type: "organic",
+        proportions: "Remove nearby galls on alternate hosts where feasible.",
+        frequency: "Inspect nearby junipers before spring spore release.",
+        description: "Breaks cedar-apple rust lifecycle and lowers reinfection pressure.",
+        safety_precautions: ["Dispose infected material away from orchard"],
+        effectiveness_rating: 4,
+      },
+      {
+        name: "Sulfur-Based Organic Protectant",
+        type: "organic",
+        proportions: "Use approved sulfur formulation at orchard label rate.",
+        frequency: "Repeat every 7-10 days as preventive coverage.",
+        description: "Lower-risk preventive option for early-season rust suppression.",
+        safety_precautions: ["Avoid high-temperature spray windows to reduce phytotoxicity"],
+        effectiveness_rating: 3,
+      },
+    ];
+  }
+
+  if (disease.includes("citrus") && disease.includes("canker")) {
+    return [
+      {
+        name: "Copper Bactericide Program",
+        type: "chemical",
+        proportions: "Apply copper formulation at labeled citrus canker rate.",
+        frequency: "7-14 day interval during flush and rainy periods.",
+        description: "Primary suppressive treatment for bacterial canker on new citrus growth.",
+        safety_precautions: ["Avoid excessive copper accumulation", "Observe label and local compliance"],
+        effectiveness_rating: 5,
+      },
+      {
+        name: "Streptomycin-Compatible Window (Where Allowed)",
+        type: "chemical",
+        proportions: "Only where local regulations and labels permit bactericide use.",
+        frequency: "Use in rotation windows, not continuously.",
+        description: "Can reduce bacterial pressure in severe outbreaks when legally permitted.",
+        safety_precautions: ["Follow local legal restrictions strictly", "Prevent resistance via rotation"],
+        effectiveness_rating: 4,
+      },
+      {
+        name: "Sanitation and Pruning Protocol",
+        type: "organic",
+        proportions: "Prune infected twigs/leaves, disinfect tools between cuts.",
+        frequency: "Weekly scouting and immediate removal of new lesions.",
+        description: "Directly lowers inoculum load and spread by contaminated equipment.",
+        safety_precautions: ["Destroy removed material away from orchard"],
+        effectiveness_rating: 4,
+      },
+      {
+        name: "Windbreak + Splash Reduction",
+        type: "organic",
+        proportions: "Install/maintain windbreak and reduce overhead splash.",
+        frequency: "Maintain continuously in high-wind and wet seasons.",
+        description: "Reduces wind-driven bacterial spread and rain splash transmission.",
+        safety_precautions: ["Do not irrigate overhead during active outbreaks"],
+        effectiveness_rating: 3,
+      },
+    ];
+  }
+
+  if ((plant.includes("tomato") || plant.includes("potato")) && disease.includes("blight")) {
+    return [
+      {
+        name: "Blight-Specific FRAC Rotation",
+        type: "chemical",
+        proportions: "Use crop-labeled blight actives; rotate FRAC groups.",
+        frequency: "7-day schedule in wet/humid periods.",
+        description: "Disease-targeted rotation for blight suppression and resistance management.",
+        safety_precautions: ["Do not repeat same FRAC back-to-back excessively"],
+        effectiveness_rating: 5,
+      },
+      {
+        name: "Protective Contact Fungicide",
+        type: "chemical",
+        proportions: "Apply full coverage protectant at label rate.",
+        frequency: "Reapply after heavy rainfall.",
+        description: "Protects healthy tissue from new infections.",
+        safety_precautions: ["Observe pre-harvest interval"],
+        effectiveness_rating: 4,
+      },
+      {
+        name: "Bacillus + Potassium Bicarbonate Program",
+        type: "organic",
+        proportions: "Use labeled rates with complete leaf coverage.",
+        frequency: "Weekly preventive program.",
+        description: "Lower-risk suppression for early lesions and preventive management.",
+        safety_precautions: ["Apply during cooler hours to limit stress"],
+        effectiveness_rating: 3,
+      },
+      {
+        name: "Leaf Removal and Irrigation Hygiene",
+        type: "organic",
+        proportions: "Remove heavily infected leaves and avoid overhead irrigation.",
+        frequency: "Scout every 3-4 days in high-risk weather.",
+        description: "Reduces inoculum and leaf wetness duration that drives blight spread.",
+        safety_precautions: ["Sanitize tools and gloves between plants"],
+        effectiveness_rating: 4,
+      },
+    ];
+  }
+
+  return genericTreatmentSet();
+};
+
+const treatments = (prompt = "") => {
+  const context = parseTreatmentContext(prompt);
+  return {
+    treatments: diseaseSpecificTreatmentSet(context.plant, context.disease),
+  };
+};
 
 const predictions = () => ({
   predictions: [
@@ -393,7 +543,7 @@ const parseJsonFromText = (value) => {
 
 const callOpenAi = async ({ prompt, schema, fileUrls, options, type }) => {
   const apiKey = String(options?.ai?.openAiApiKey || "").trim();
-  if (!apiKey) return null;
+  if (isPlaceholderSecret(apiKey)) return null;
 
   const model = String(options?.ai?.openAiModel || "gpt-4o-mini").trim() || "gpt-4o-mini";
   const timeoutMs = clamp(i(options?.ai?.openAiTimeoutMs, 18000), 5000, 60000);
@@ -444,6 +594,90 @@ const callOpenAi = async ({ prompt, schema, fileUrls, options, type }) => {
   } finally {
     clearTimeout(timer);
   }
+};
+
+const callGemini = async ({ prompt, schema, fileUrls, options, type }) => {
+  const apiKey = String(options?.ai?.geminiApiKey || "").trim();
+  if (isPlaceholderSecret(apiKey)) return null;
+
+  const model = String(options?.ai?.geminiModel || DEFAULT_GEMINI_MODEL).trim() || DEFAULT_GEMINI_MODEL;
+  const baseUrl = String(options?.ai?.geminiBaseUrl || DEFAULT_GEMINI_BASE_URL).trim() || DEFAULT_GEMINI_BASE_URL;
+  const timeoutMs = clamp(i(options?.ai?.geminiTimeoutMs, 25000), 5000, 90000);
+  const maxTokens = clamp(i(options?.ai?.maxOutputTokens, 1400), 200, 4096);
+  const images = await resolveImageAssets(fileUrls, options);
+
+  const parts = [{ text: prompt || "Provide response." }];
+  for (const image of images) {
+    parts.push({
+      inlineData: {
+        mimeType: image.mime,
+        data: image.buffer.toString("base64"),
+      },
+    });
+  }
+
+  const generationConfig = {
+    temperature: 0.1,
+    maxOutputTokens: maxTokens,
+    ...(schema ? { responseMimeType: "application/json" } : {}),
+  };
+
+  const body = {
+    contents: [{ role: "user", parts }],
+    generationConfig,
+  };
+
+  const endpoint = `${baseUrl.replace(/\/+$/, "")}/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    if (payload?.promptFeedback?.blockReason) return null;
+    const text = extractText(payload?.candidates?.[0]?.content?.parts).trim();
+    if (!text) return null;
+    if (!schema) return text;
+    const parsed = parseJsonFromText(text);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return shape(schema, parsed);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+const resolveProviderOrder = (options = {}) => {
+  const requested = normalizeKey(options?.ai?.provider || "auto");
+  const hasGemini = !isPlaceholderSecret(options?.ai?.geminiApiKey);
+  const hasOpenAi = !isPlaceholderSecret(options?.ai?.openAiApiKey);
+
+  if (requested === "gemini") return ["gemini", "openai"];
+  if (requested === "openai") return ["openai", "gemini"];
+  if (hasGemini && hasOpenAi) return ["gemini", "openai"];
+  if (hasGemini) return ["gemini"];
+  if (hasOpenAi) return ["openai"];
+  return ["gemini", "openai"];
+};
+
+const callConfiguredModel = async ({ prompt, schema, fileUrls, options, type }) => {
+  const order = resolveProviderOrder(options);
+  for (const provider of order) {
+    const out =
+      provider === "gemini"
+        ? await callGemini({ prompt, schema, fileUrls, options, type })
+        : await callOpenAi({ prompt, schema, fileUrls, options, type });
+    if (out != null) return out;
+  }
+  return null;
 };
 
 const imageSignal = async (fileUrls, options) => {
@@ -581,7 +815,7 @@ export async function buildLlmResponse(payload = {}, options = {}) {
       const d = w.forecast?.[0] || {};
       return `Current weather for ${c.location || DEFAULT_LOCATION}: ${Math.round(n(c.temperature, 74))}F, ${(c.conditions || "moderate").toLowerCase()}, humidity ${Math.round(n(c.humidity, 60))}%, wind ${Math.round(n(c.wind_speed, 8))} mph. Today forecast: high ${Math.round(n(d.high, 76))}F, low ${Math.round(n(d.low, 62))}F, precipitation chance ${Math.round(n(d.precipitation_chance, 20))}%.`;
     }
-    const aiText = await callOpenAi({ prompt, schema: null, fileUrls, options, type: "text" });
+    const aiText = await callConfiguredModel({ prompt, schema: null, fileUrls, options, type: "text" });
     if (typeof aiText === "string" && aiText.trim()) return aiText.trim();
     if (prompt) return "Use soil moisture checks, frequent scouting, and rotation-based treatment strategy.";
     return "Share crop, location, and issue for guidance.";
@@ -620,7 +854,7 @@ export async function buildLlmResponse(payload = {}, options = {}) {
     return shape(schema, out);
   }
 
-  const aiOut = await callOpenAi({ prompt, schema, fileUrls, options, type });
+  const aiOut = await callConfiguredModel({ prompt, schema, fileUrls, options, type });
   if (aiOut != null) return aiOut;
 
   const signal = await imageSignal(fileUrls, options);
@@ -628,7 +862,7 @@ export async function buildLlmResponse(payload = {}, options = {}) {
   if (type === "plant") out = fallbackPlant(signal);
   else if (type === "disease") out = fallbackDisease(signal, prompt);
   else if (type === "verify") out = fallbackVerify(signal, prompt);
-  else if (type === "treatments") out = treatments();
+  else if (type === "treatments") out = treatments(prompt);
   else if (type === "timeline") out = timeline(prompt);
   else if (type === "predictions") out = predictions();
   else if (type === "suggestions") out = suggestions();

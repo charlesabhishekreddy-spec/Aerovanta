@@ -26,6 +26,11 @@ const toList = (value, fallback = []) => {
   return items.length > 0 ? items : fallback;
 };
 
+const toText = (value, fallback = "") => {
+  const text = String(value ?? "").trim();
+  return text || fallback;
+};
+
 const resolveFromRoot = (value) => {
   if (!value) return value;
   return path.isAbsolute(value) ? value : path.resolve(process.cwd(), value);
@@ -96,6 +101,12 @@ export function loadConfig(env = process.env) {
       },
     },
     ai: {
+      provider: toText(env.AI_PROVIDER, "auto").toLowerCase(),
+      allowProviderFallback: toBool(env.AI_PROVIDER_FALLBACK, true),
+      geminiApiKey: String(env.GEMINI_API_KEY || ""),
+      geminiModel: toText(env.GEMINI_MODEL, "gemini-2.5-flash"),
+      geminiTimeoutMs: toInt(env.GEMINI_TIMEOUT_MS, 25_000),
+      geminiBaseUrl: toText(env.GEMINI_BASE_URL, "https://generativelanguage.googleapis.com"),
       openAiApiKey: String(env.OPENAI_API_KEY || ""),
       openAiModel: String(env.OPENAI_MODEL || "gpt-4o-mini"),
       openAiTimeoutMs: toInt(env.OPENAI_TIMEOUT_MS, 18_000),

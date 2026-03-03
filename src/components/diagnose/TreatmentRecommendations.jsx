@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Loader2, Beaker, Leaf, ChevronDown, ChevronUp, RefreshCw, Heart, Star, ShieldAlert } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
+const normalizeKey = (value) => String(value || "").trim().toLowerCase();
+
 export default function TreatmentRecommendations({ diagnosis }) {
   const [treatments, setTreatments] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -13,11 +15,13 @@ export default function TreatmentRecommendations({ diagnosis }) {
 
   const shouldDisableTreatments =
     diagnosis?.is_healthy ||
-    diagnosis?.requires_manual_review ||
     !diagnosis?.disease_name ||
     String(diagnosis?.disease_name || "").toLowerCase().includes("uncertain");
 
-  const fetchTreatments = async () => {
+  const isProvisional = Boolean(diagnosis?.requires_manual_review);
+  const diagnosisSignature = `${normalizeKey(diagnosis?.plant_name)}|${normalizeKey(diagnosis?.disease_name)}`;
+
+  const fetchTreatments = async ({ forceRefresh = false } = {}) => {
     if (shouldDisableTreatments) {
       setTreatments([]);
       setIsLoading(false);
@@ -26,15 +30,25 @@ export default function TreatmentRecommendations({ diagnosis }) {
 
     setIsLoading(true);
     try {
-      const existingTreatments = await appClient.entities.Treatment.filter({
+      const scopedTreatments = await appClient.entities.Treatment.filter({
         disease_name: diagnosis.disease_name,
+        diagnosis_signature: diagnosisSignature,
       });
+      const hasCompleteScopedSet =
+        scopedTreatments.length >= 4 &&
+        scopedTreatments.every(
+          (t) =>
+            String(t?.treatment_name || "").trim() &&
+            String(t?.description || "").trim() &&
+            String(t?.frequency || "").trim()
+        );
 
-      if (existingTreatments.length > 0) {
-        const formattedTreatments = existingTreatments.map((t) => ({
+      if (hasCompleteScopedSet && !forceRefresh) {
+        const formattedTreatments = scopedTreatments.map((t) => ({
           name: t.treatment_name,
           type: t.treatment_type,
           proportions: t.application_method || "See description",
+          frequency: t.frequency || "",
           description: t.description,
           safety_precautions: t.safety_precautions,
           effectiveness_rating: t.effectiveness_rating,
@@ -43,20 +57,33 @@ export default function TreatmentRecommendations({ diagnosis }) {
         setTreatments(formattedTreatments);
       } else {
         const result = await appClient.integrations.Core.InvokeLLM({
-          prompt: `You are an expert plant pathologist. Provide detailed treatment recommendations for:
+          prompt: `You are an expert plant pathologist creating crop-specific, disease-specific treatment recommendations.
 
 Plant: ${diagnosis.plant_name}
 Disease: ${diagnosis.disease_name}
 Infection Level: ${diagnosis.infection_level || diagnosis.confidence_score}%
+Severity: ${diagnosis.severity || "not provided"}
+Symptoms: ${(diagnosis.symptoms || []).join(", ") || "not provided"}
+Diagnosis Notes: ${diagnosis.diagnosis_notes || "not provided"}
+Confidence Mode: ${isProvisional ? "provisional_low_confidence" : "verified_high_confidence"}
 
-Provide exactly 4 treatment options: 2 chemical and 2 organic.
+Rules:
+- Recommendations must be specific to this exact plant and disease pair.
+- Do not include treatments that are irrelevant to this disease or host crop.
+- Include clear application frequency and timing windows.
+- Prefer integrated management and resistance-rotation safe practices.
+- If confidence mode is provisional, include lower-risk first-line options before aggressive systemic options.
+
+Provide exactly 4 treatment options: 2 chemical and 2 organic/biological.
 For each treatment provide:
 1. Treatment name
 2. Type (chemical or organic)
 3. Application method and proportions
-4. Description
-5. Safety precautions (array)
-6. Effectiveness rating (1-5)`,
+4. Frequency
+5. Description (why this is specific to this diagnosis)
+6. Safety precautions (array)
+7. Effectiveness rating (1-5)`,
+          ...(diagnosis?.image_url ? { file_urls: [diagnosis.image_url] } : {}),
           response_json_schema: {
             type: "object",
             properties: {
@@ -68,6 +95,7 @@ For each treatment provide:
                     name: { type: "string" },
                     type: { type: "string", enum: ["chemical", "organic"] },
                     proportions: { type: "string" },
+                    frequency: { type: "string" },
                     description: { type: "string" },
                     safety_precautions: { type: "array", items: { type: "string" } },
                     effectiveness_rating: { type: "number" },
@@ -79,18 +107,42 @@ For each treatment provide:
         });
 
         const newlySavedTreatments = [];
-        for (const treatment of result.treatments || []) {
-          const saved = await appClient.entities.Treatment.create({
+        const nextTreatments = Array.isArray(result?.treatments) ? result.treatments.slice(0, 4) : [];
+
+        for (let index = 0; index < nextTreatments.length; index += 1) {
+          const treatment = nextTreatments[index];
+          const payload = {
             disease_name: diagnosis.disease_name,
             treatment_name: treatment.name,
             treatment_type: treatment.type,
             description: treatment.description,
             application_method: treatment.proportions,
+            frequency: treatment.frequency || "",
             safety_precautions: treatment.safety_precautions,
             effectiveness_rating: treatment.effectiveness_rating,
+            diagnosis_signature: diagnosisSignature,
+            plant_name: diagnosis.plant_name,
             is_favorite: false,
-          });
-          newlySavedTreatments.push({ ...treatment, id: saved.id });
+          };
+          const existing = scopedTreatments[index];
+          if (existing?.id) {
+            const updated = await appClient.entities.Treatment.update(existing.id, {
+              ...payload,
+              is_favorite: Boolean(existing.is_favorite),
+            });
+            newlySavedTreatments.push({ ...treatment, id: updated?.id || existing.id });
+          } else {
+            const saved = await appClient.entities.Treatment.create(payload);
+            newlySavedTreatments.push({ ...treatment, id: saved.id });
+          }
+        }
+
+        if (forceRefresh && scopedTreatments.length > nextTreatments.length) {
+          for (const stale of scopedTreatments.slice(nextTreatments.length)) {
+            if (stale?.id) {
+              await appClient.entities.Treatment.delete(stale.id);
+            }
+          }
         }
 
         setTreatments(newlySavedTreatments);
@@ -105,7 +157,7 @@ For each treatment provide:
 
   useEffect(() => {
     fetchTreatments();
-  }, [diagnosis?.disease_name, diagnosis?.requires_manual_review, diagnosis?.is_healthy]);
+  }, [diagnosisSignature, diagnosis?.is_healthy]);
 
   const toggleExpand = (index) => {
     setExpandedId(expandedId === index ? null : index);
@@ -122,8 +174,11 @@ For each treatment provide:
           treatment_type: treatment.type,
           description: treatment.description,
           application_method: treatment.proportions,
+          frequency: treatment.frequency || "",
           safety_precautions: treatment.safety_precautions,
           effectiveness_rating: treatment.effectiveness_rating,
+          diagnosis_signature: diagnosisSignature,
+          plant_name: diagnosis.plant_name,
           is_favorite: true,
         });
       }
@@ -149,6 +204,7 @@ For each treatment provide:
   }
 
   if (shouldDisableTreatments) {
+    const isHealthy = Boolean(diagnosis?.is_healthy);
     return (
       <Card className="h-full rounded-3xl border border-white/70 bg-white/75 shadow-xl backdrop-blur-sm">
         <CardContent className="p-0">
@@ -161,7 +217,9 @@ For each treatment provide:
                 <ShieldAlert className="h-4 w-4" />
                 Treatments paused
               </div>
-              Recommendations are hidden until diagnosis confidence is verified and disease evidence is clear.
+              {isHealthy
+                ? "Plant is marked healthy. Active disease treatments are not required right now."
+                : "Recommendations are hidden because disease evidence is unclear."}
             </div>
           </div>
         </CardContent>
@@ -174,11 +232,23 @@ For each treatment provide:
       <CardContent className="p-0">
         <div className="flex items-center justify-between border-b bg-gradient-to-r from-violet-50/90 to-white p-4">
           <h2 className="text-xl font-bold text-gray-900">Treatment Suggestions</h2>
-          <Button variant="ghost" size="sm" onClick={fetchTreatments} className="gap-2">
+          <Button variant="ghost" size="sm" onClick={() => fetchTreatments({ forceRefresh: true })} className="gap-2">
             <RefreshCw className="h-4 w-4" />
             Refetch Treatments
           </Button>
         </div>
+
+        {isProvisional && (
+          <div className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <div className="flex items-start gap-2">
+              <ShieldAlert className="mt-0.5 h-4 w-4 flex-shrink-0" />
+              <span>
+                Provisional recommendations: diagnosis confidence is low. Apply low-risk/organic steps first and verify
+                with a clearer image before aggressive chemical treatment.
+              </span>
+            </div>
+          </div>
+        )}
 
         <div className="max-h-[42rem] divide-y overflow-y-auto">
           {treatments.length === 0 && (
@@ -214,6 +284,13 @@ For each treatment provide:
                       <h4 className="mb-1 font-semibold text-gray-900">Application Method</h4>
                       <p className="text-sm text-gray-700">{treatment.proportions}</p>
                     </div>
+
+                    {treatment.frequency && (
+                      <div>
+                        <h4 className="mb-1 font-semibold text-gray-900">Frequency</h4>
+                        <p className="text-sm text-gray-700">{treatment.frequency}</p>
+                      </div>
+                    )}
 
                     <div>
                       <h4 className="mb-1 font-semibold text-gray-900">Description</h4>

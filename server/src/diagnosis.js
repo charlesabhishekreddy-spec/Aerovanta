@@ -3,8 +3,11 @@ import { readFile } from "node:fs/promises";
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MIN_RELIABLE_CONFIDENCE = 65;
-const DEFAULT_MODEL = "gpt-4o-mini";
+const DEFAULT_OPENAI_MODEL = "gpt-4o-mini";
+const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
 const OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions";
+const DEFAULT_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
+const DIAGNOSIS_PIPELINE_VERSION = "diagnosis-v3-gemini";
 
 const MIME_BY_EXTENSION = {
   ".jpg": "image/jpeg",
@@ -17,6 +20,7 @@ const MIME_BY_EXTENSION = {
 };
 
 const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
+const normalizeText = (value) => String(value ?? "").trim().toLowerCase();
 
 const toNumber = (value, fallback = 0) => {
   const parsed = Number.parseFloat(String(value ?? ""));
@@ -51,20 +55,50 @@ const makeError = (status, code, message) => {
   return error;
 };
 
-const sanitizeOpenAiMessage = (value) => String(value || "").replace(/\s+/g, " ").trim().slice(0, 360);
+const sanitizeMessage = (value) => String(value || "").replace(/\s+/g, " ").trim().slice(0, 360);
+const isPlaceholderSecret = (value) => {
+  const token = String(value || "").trim().toLowerCase();
+  return !token || token === "your_real_key" || token === "changeme" || token === "replace_me";
+};
+
+const parseOpenAiError = (detailText = "") => {
+  const raw = String(detailText || "").trim();
+  if (!raw) return { message: "", code: "" };
+  const parsed = parseJsonSafe(raw);
+  const errorObj = parsed?.error && typeof parsed.error === "object" ? parsed.error : {};
+  return {
+    message: sanitizeMessage(errorObj?.message || raw),
+    code: String(errorObj?.code || "").trim().toLowerCase(),
+  };
+};
+
+const parseGeminiError = (detailText = "") => {
+  const raw = String(detailText || "").trim();
+  if (!raw) return { message: "", status: "", code: "" };
+  const parsed = parseJsonSafe(raw);
+  const errorObj = parsed?.error && typeof parsed.error === "object" ? parsed.error : {};
+  return {
+    message: sanitizeMessage(errorObj?.message || raw),
+    status: String(errorObj?.status || "").trim().toUpperCase(),
+    code: String(errorObj?.code || "").trim(),
+  };
+};
 
 const normalizeUploadsPublicPath = (value) => `/${String(value || "/uploads").replace(/^\/+|\/+$/g, "")}`;
 
 const parseDataUrl = (value) => {
   const match = String(value || "").match(/^data:(image\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/i);
   if (!match) return null;
-  const buffer = Buffer.from(match[2], "base64");
+  const mime = match[1].toLowerCase();
+  const base64 = match[2];
+  const buffer = Buffer.from(base64, "base64");
   if (!buffer.length) return null;
   if (buffer.length > MAX_IMAGE_BYTES) {
     throw makeError(413, "payload_too_large", "Uploaded image is too large.");
   }
   return {
-    mime: match[1].toLowerCase(),
+    mime,
+    base64,
     dataUrl: value,
   };
 };
@@ -74,6 +108,7 @@ const resolveUploadedImage = async (fileUrl, options = {}) => {
   if (!uploadDir) {
     throw makeError(500, "upload_dir_unavailable", "Upload directory is not configured.");
   }
+
   const uploadsPublicPath = normalizeUploadsPublicPath(options.uploadsPublicPath || "/uploads");
   if (!String(fileUrl || "").startsWith(`${uploadsPublicPath}/`)) {
     throw makeError(400, "invalid_file_url", "Diagnosis expects an uploaded image path.");
@@ -96,20 +131,21 @@ const resolveUploadedImage = async (fileUrl, options = {}) => {
 
   const ext = path.extname(fileName).toLowerCase();
   const mime = MIME_BY_EXTENSION[ext] || "image/jpeg";
+  const base64 = buffer.toString("base64");
   return {
     mime,
-    dataUrl: `data:${mime};base64,${buffer.toString("base64")}`,
+    base64,
+    dataUrl: `data:${mime};base64,${base64}`,
   };
 };
 
-const getImageDataUrl = async (fileUrl, options = {}) => {
+const getImagePayload = async (fileUrl, options = {}) => {
   const inline = parseDataUrl(fileUrl);
-  if (inline) return inline.dataUrl;
+  if (inline) return inline;
   if (String(fileUrl || "").startsWith("blob:")) {
     throw makeError(400, "upload_failed", "Image upload failed. Please retry and run diagnosis again.");
   }
-  const uploaded = await resolveUploadedImage(fileUrl, options);
-  return uploaded.dataUrl;
+  return resolveUploadedImage(fileUrl, options);
 };
 
 const parseMessageText = (content) => {
@@ -155,6 +191,7 @@ const normalizeDiagnosis = (raw = {}) => {
   const isPlant =
     Boolean(raw.is_plant ?? raw.isPlant ?? true) &&
     !["not a plant", "non-plant", "not plant", "not applicable"].includes(isPlantHint);
+
   const diseaseText = toText(raw.disease_name ?? raw.disease, "").toLowerCase();
   const diseaseType = toText(raw.disease_type, "uncertain").toLowerCase();
   const inferredHealthy =
@@ -162,16 +199,10 @@ const normalizeDiagnosis = (raw = {}) => {
     diseaseText.includes("healthy") ||
     diseaseType === "none";
   const isHealthy = Boolean(raw.is_healthy ?? raw.isHealthy) || inferredHealthy;
-  const confidenceRaw =
-    raw.confidence_score ??
-    raw.confidence ??
-    (isPlant ? (isHealthy ? 78 : 72) : 25);
+
+  const confidenceRaw = raw.confidence_score ?? raw.confidence ?? (isPlant ? (isHealthy ? 78 : 72) : 25);
   const confidence = clamp(Math.round(toNumber(confidenceRaw, 0)), 0, 100);
-  const infectionLevel = clamp(
-    Math.round(toNumber(raw.infection_level ?? raw.infectionLevel, 0)),
-    0,
-    100
-  );
+  const infectionLevel = clamp(Math.round(toNumber(raw.infection_level ?? raw.infectionLevel, 0)), 0, 100);
 
   const requiresManualReview =
     Boolean(raw.requires_manual_review) ||
@@ -203,8 +234,6 @@ const normalizeDiagnosis = (raw = {}) => {
   };
 };
 
-const normalizeText = (value) => String(value ?? "").trim().toLowerCase();
-
 const buildPrompt = (plantReference) => `You are an expert in plant pathology. Your task is to analyze the provided image of a plant.
 
 First, identify the plant in the image.
@@ -230,7 +259,7 @@ plantName, disease, infectionLevel, isPlant, confidence, symptoms, diagnosisNote
 
 Return 0 for infectionLevel if no disease is detected.`;
 
-const buildResponseSchema = () => ({
+const buildOpenAiResponseSchema = () => ({
   type: "json_schema",
   json_schema: {
     name: "plant_diagnosis",
@@ -243,10 +272,7 @@ const buildResponseSchema = () => ({
         infectionLevel: { type: "number" },
         isPlant: { type: "boolean" },
         confidence: { type: "number" },
-        symptoms: {
-          type: "array",
-          items: { type: "string" },
-        },
+        symptoms: { type: "array", items: { type: "string" } },
         diagnosisNotes: { type: "string" },
       },
       required: ["plantName", "disease", "infectionLevel"],
@@ -255,40 +281,65 @@ const buildResponseSchema = () => ({
   },
 });
 
-const makeAiCallError = (status, detailText = "") => {
-  const details = sanitizeOpenAiMessage(detailText);
+const makeOpenAiCallError = (status, detailText = "") => {
+  const details = parseOpenAiError(detailText);
   if (status === 401 || status === 403) {
     return makeError(
       502,
       "ai_auth_failed",
-      details || "Diagnosis AI authentication failed. Check OPENAI_API_KEY and model access."
+      details.message || "Diagnosis AI authentication failed. Check OPENAI_API_KEY and model access."
     );
   }
   if (status === 429) {
-    return makeError(
-      503,
-      "ai_rate_limited",
-      details || "Diagnosis AI rate limit reached. Please retry in a moment."
-    );
+    if (details.code === "insufficient_quota") {
+      return makeError(
+        503,
+        "ai_quota_exceeded",
+        "Diagnosis AI quota exceeded. Add billing/credits or switch provider."
+      );
+    }
+    return makeError(503, "ai_rate_limited", details.message || "Diagnosis AI rate limit reached. Retry shortly.");
   }
   if (status === 400 || status === 404 || status === 422) {
     return makeError(
       502,
       "ai_bad_request",
-      details || "Diagnosis model rejected the request. Check model configuration and payload."
+      details.message || "Diagnosis model rejected the request. Check model configuration and payload."
     );
   }
-  return makeError(502, "ai_call_failed", details || "Unable to complete diagnosis model request.");
+  return makeError(502, "ai_call_failed", details.message || "Unable to complete diagnosis model request.");
 };
 
-const callOpenAiDiagnosis = async ({ dataUrl, plantReference, ai }) => {
+const makeGeminiCallError = (status, detailText = "") => {
+  const details = parseGeminiError(detailText);
+  if (status === 401 || status === 403) {
+    return makeError(
+      502,
+      "ai_auth_failed",
+      details.message || "Gemini authentication failed. Check GEMINI_API_KEY and model access."
+    );
+  }
+  if (status === 429 || details.status === "RESOURCE_EXHAUSTED") {
+    return makeError(503, "ai_rate_limited", details.message || "Gemini rate limit reached. Retry shortly.");
+  }
+  if (status === 400 || status === 404 || status === 422 || details.status === "INVALID_ARGUMENT") {
+    return makeError(
+      502,
+      "ai_bad_request",
+      details.message || "Gemini rejected the diagnosis request. Check model and payload."
+    );
+  }
+  return makeError(502, "ai_call_failed", details.message || "Unable to complete Gemini diagnosis request.");
+};
+
+const callOpenAiDiagnosis = async ({ image, plantReference, ai }) => {
   const apiKey = String(ai?.openAiApiKey || "").trim();
-  if (!apiKey) {
-    throw makeError(503, "ai_not_configured", "Diagnosis AI is not configured on the server.");
+  if (isPlaceholderSecret(apiKey)) {
+    throw makeError(503, "ai_not_configured", "OpenAI key is not configured.");
   }
 
-  const model = String(ai?.openAiModel || DEFAULT_MODEL).trim() || DEFAULT_MODEL;
-  const timeoutMs = clamp(toNumber(ai?.openAiTimeoutMs, 18000), 5000, 60000);
+  const model = String(ai?.openAiModel || DEFAULT_OPENAI_MODEL).trim() || DEFAULT_OPENAI_MODEL;
+  const timeoutMs = clamp(toNumber(ai?.openAiTimeoutMs, 20000), 5000, 60000);
   const maxOutputTokens = clamp(Math.round(toNumber(ai?.maxOutputTokens, 1200)), 300, 4096);
 
   const basePayload = {
@@ -305,14 +356,14 @@ const callOpenAiDiagnosis = async ({ dataUrl, plantReference, ai }) => {
         role: "user",
         content: [
           { type: "text", text: buildPrompt(plantReference) },
-          { type: "image_url", image_url: { url: dataUrl, detail: "high" } },
+          { type: "image_url", image_url: { url: image.dataUrl, detail: "high" } },
         ],
       },
     ],
   };
 
   const attempts = [
-    { ...basePayload, response_format: buildResponseSchema() },
+    { ...basePayload, response_format: buildOpenAiResponseSchema() },
     { ...basePayload, response_format: { type: "json_object" } },
   ];
 
@@ -333,8 +384,7 @@ const callOpenAiDiagnosis = async ({ dataUrl, plantReference, ai }) => {
 
       if (!response.ok) {
         const details = await response.text();
-        lastError = makeAiCallError(response.status, details);
-        // Some models reject json_schema. Retry once with json_object.
+        lastError = makeOpenAiCallError(response.status, details);
         if ((response.status === 400 || response.status === 422) && idx === 0) {
           continue;
         }
@@ -348,7 +398,7 @@ const callOpenAiDiagnosis = async ({ dataUrl, plantReference, ai }) => {
         lastError = makeError(502, "ai_invalid_response", "Diagnosis model returned invalid JSON.");
         continue;
       }
-      return parsed;
+      return { raw: parsed, provider: "openai", model };
     }
     throw lastError || makeError(502, "ai_invalid_response", "Diagnosis model returned invalid JSON.");
   } catch (error) {
@@ -360,6 +410,126 @@ const callOpenAiDiagnosis = async ({ dataUrl, plantReference, ai }) => {
   } finally {
     clearTimeout(timer);
   }
+};
+
+const callGeminiDiagnosis = async ({ image, plantReference, ai }) => {
+  const apiKey = String(ai?.geminiApiKey || "").trim();
+  if (isPlaceholderSecret(apiKey)) {
+    throw makeError(
+      503,
+      "ai_not_configured",
+      "Gemini API key is not configured. Replace GEMINI_API_KEY in .env with a real key."
+    );
+  }
+
+  const model = String(ai?.geminiModel || DEFAULT_GEMINI_MODEL).trim() || DEFAULT_GEMINI_MODEL;
+  const baseUrl = String(ai?.geminiBaseUrl || DEFAULT_GEMINI_BASE_URL).trim() || DEFAULT_GEMINI_BASE_URL;
+  const timeoutMs = clamp(toNumber(ai?.geminiTimeoutMs, 25000), 5000, 90000);
+  const maxOutputTokens = clamp(Math.round(toNumber(ai?.maxOutputTokens, 1200)), 300, 4096);
+  const endpoint = `${baseUrl.replace(/\/+$/, "")}/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+  const payload = {
+    contents: [
+      {
+        role: "user",
+        parts: [
+          { text: buildPrompt(plantReference) },
+          {
+            inlineData: {
+              mimeType: image.mime,
+              data: image.base64,
+            },
+          },
+        ],
+      },
+    ],
+    generationConfig: {
+      temperature: 0,
+      maxOutputTokens,
+      responseMimeType: "application/json",
+    },
+  };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const details = await response.text();
+      throw makeGeminiCallError(response.status, details);
+    }
+
+    const json = await response.json();
+    if (json?.promptFeedback?.blockReason) {
+      throw makeError(
+        422,
+        "ai_safety_blocked",
+        "Diagnosis request was blocked by safety filters. Upload a clear crop-only image."
+      );
+    }
+
+    const messageText = parseMessageText(json?.candidates?.[0]?.content?.parts);
+    const parsed = parseModelJson(messageText);
+    if (!parsed) {
+      throw makeError(502, "ai_invalid_response", "Gemini returned invalid JSON.");
+    }
+    return { raw: parsed, provider: "gemini", model };
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw makeError(504, "ai_timeout", "Diagnosis model timed out.");
+    }
+    if (error?.status) throw error;
+    throw makeError(502, "ai_call_failed", "Unable to complete Gemini diagnosis request.");
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+const shouldFallback = (errorCode) =>
+  ["ai_not_configured", "ai_quota_exceeded", "ai_rate_limited", "ai_auth_failed"].includes(String(errorCode || ""));
+
+const resolveProviderOrder = (ai) => {
+  const requested = normalizeText(ai?.provider || "auto");
+  const hasGemini = Boolean(String(ai?.geminiApiKey || "").trim());
+  const hasOpenAi = Boolean(String(ai?.openAiApiKey || "").trim());
+
+  if (requested === "gemini") return ["gemini"];
+  if (requested === "openai") return ["openai"];
+
+  if (hasGemini && hasOpenAi) return ["gemini", "openai"];
+  if (hasGemini) return ["gemini"];
+  if (hasOpenAi) return ["openai"];
+  return ["gemini", "openai"];
+};
+
+const runDiagnosisByProvider = async ({ image, plantReference, ai }) => {
+  const allowFallback = Boolean(ai?.allowProviderFallback ?? true);
+  const order = resolveProviderOrder(ai);
+  let lastError = null;
+
+  for (let index = 0; index < order.length; index += 1) {
+    const provider = order[index];
+    try {
+      if (provider === "gemini") return await callGeminiDiagnosis({ image, plantReference, ai });
+      return await callOpenAiDiagnosis({ image, plantReference, ai });
+    } catch (error) {
+      lastError = error;
+      const isLast = index === order.length - 1;
+      if (isLast || !allowFallback || !shouldFallback(error?.code)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError || makeError(503, "ai_not_configured", "No AI provider is configured for diagnosis.");
 };
 
 export async function diagnosePlantImage({ fileUrl, plantDatabase = [], ai = {}, uploadDir, uploadsPublicPath }) {
@@ -378,7 +548,15 @@ export async function diagnosePlantImage({ fileUrl, plantDatabase = [], ai = {},
         .join(", ")
     : "";
 
-  const dataUrl = await getImageDataUrl(fileUrl, { uploadDir, uploadsPublicPath });
-  const raw = await callOpenAiDiagnosis({ dataUrl, plantReference, ai });
-  return normalizeDiagnosis(raw);
+  const image = await getImagePayload(fileUrl, { uploadDir, uploadsPublicPath });
+  const diagnosisRun = await runDiagnosisByProvider({ image, plantReference, ai });
+  const normalized = normalizeDiagnosis(diagnosisRun.raw);
+
+  return {
+    ...normalized,
+    model_provider: diagnosisRun.provider,
+    model_name: diagnosisRun.model,
+    pipeline_version: DIAGNOSIS_PIPELINE_VERSION,
+    confidence_threshold: MIN_RELIABLE_CONFIDENCE,
+  };
 }

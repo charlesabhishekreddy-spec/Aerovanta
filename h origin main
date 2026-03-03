@@ -1,0 +1,39 @@
+* [33m34498cf[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m Removed Sceret Key
+* [33m33b64b3[m  fixing  diadnosis
+* [33m188d131[m Completed functionalities in home page
+* [33m055830d[m Gamified env added
+* [33m1cc95e7[m Redone UI components
+* [33m2d30da9[m Login Page Updated
+* [33m1a67782[m Login Page Updated
+* [33mc987f07[m Fixed Login
+* [33me8aa3a4[m Login Page Updated
+* [33mf51546b[m Updated ENV
+* [33m91b78c8[m Found google login bug
+* [33meee21ce[m google login failure
+* [33m0b5a782[m Added env
+* [33mdb4f7e8[m Login types
+* [33m3f4becf[m Fixed Google Login
+* [33m7dfb33d[m Login.jsx
+* [33m537491e[m Added auth
+* [33m0a8d5a9[m Update login and signup pages
+*   [33mcef0a14[m Merge pull request #4 from charlesabhishekreddy-spec/codex/finalize-app-for-production-deployment
+[32m|[m[33m\[m  
+[32m|[m * [33m2078b1a[m[33m ([m[1;31morigin/codex/finalize-app-for-production-deployment[m[33m)[m Implement production-style auth flow, admin locking, and upgraded AI responses
+[32m|[m[32m/[m  
+* [33md1f21b1[m Delete .github/workflows/node.js.yml
+*   [33m22cff5d[m Merge branch 'origin/codex/remove-base-44-dependencies-and-implement-alternatives' into main
+[34m|[m[35m\[m  
+[34m|[m * [33mc378c9b[m Replace Base44 client, add Google login, and refresh admin/dashboard UI
+[34m|[m * [33m7ad75e6[m Replace Base44 SDK with local client implementation
+* [35m|[m [33m6d6b257[m Replace Base44 stack with local appClient, add Google login, and glassmorphism UI refresh
+* [35m|[m   [33mb37d925[m Merge branch 'main' of https://github.com/charlesabhishekreddy-spec/VerdentVisionFinal
+[36m|[m[1;31m\[m [35m\[m  
+[36m|[m * [35m|[m [33m17aff54[m Add Node.js CI workflow configuration
+* [1;31m|[m [35m|[m [33m9434193[m Fix npm lock file issues and update dependencies
+[1;31m|[m[1;31m/[m [35m/[m  
+* [35m|[m   [33m57b1559[m Merge pull request #2 from charlesabhishekreddy-spec/codex/test-app-for-errors-and-fix-issues
+[35m|[m[1;33m\[m [35m\[m  
+[35m|[m [1;33m|[m[35m/[m  
+[35m|[m[35m/[m[1;33m|[m   
+[35m|[m * [33me37f5ec[m Replace Base44 stubs with full local SDK-compatible client
+[35m|[m[35m/[m  
