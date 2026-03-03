@@ -1,5 +1,3 @@
-import { PublicClientApplication } from "@azure/msal-browser";
-
 const OAUTH_TIMEOUT_MS = 60_000;
 const MICROSOFT_OAUTH_TIMEOUT_MS = 180_000;
 
@@ -58,13 +56,32 @@ let msalInstance = null;
 let msalInitPromise = null;
 let msalHandleRedirectPromise = null;
 let microsoftLoginPromise = null;
+let msalPublicClientApplication = null;
 
 function getMicrosoftRedirectUri() {
   return import.meta.env.VITE_OAUTH_REDIRECT || window.location.origin;
 }
 
-function getMsalInstance() {
+function getMsalCacheLocation() {
+  const requested = String(import.meta.env.VITE_MSAL_CACHE_LOCATION || "memoryStorage").trim().toLowerCase();
+  if (requested === "localstorage") return "localStorage";
+  if (requested === "sessionstorage") return "sessionStorage";
+  return "memoryStorage";
+}
+
+async function getMsalPublicClientApplicationClass() {
+  if (msalPublicClientApplication) return msalPublicClientApplication;
+  const mod = await import("@azure/msal-browser");
+  msalPublicClientApplication = mod?.PublicClientApplication;
+  if (!msalPublicClientApplication) {
+    throw new Error("Microsoft sign-in library failed to load.");
+  }
+  return msalPublicClientApplication;
+}
+
+async function getMsalInstance() {
   if (!msalInstance) {
+    const PublicClientApplication = await getMsalPublicClientApplicationClass();
     msalInstance = new PublicClientApplication({
       auth: {
         clientId: import.meta.env.VITE_ENTRA_CLIENT_ID || "MISSING",
@@ -72,7 +89,10 @@ function getMsalInstance() {
         redirectUri: getMicrosoftRedirectUri(),
         navigateToLoginRequestUrl: false,
       },
-      cache: { cacheLocation: "localStorage" },
+      cache: {
+        cacheLocation: getMsalCacheLocation(),
+        storeAuthStateInCookie: true,
+      },
     });
   }
   return msalInstance;
@@ -136,15 +156,24 @@ async function ensureFacebookInitialized() {
 
 async function ensureMsalInitialized() {
   ensureProviderConfigured("microsoft");
-  if (!msalInitPromise) msalInitPromise = getMsalInstance().initialize();
+  if (!msalInitPromise) {
+    msalInitPromise = (async () => {
+      const instance = await getMsalInstance();
+      await instance.initialize();
+    })();
+  }
   await msalInitPromise;
   if (!msalHandleRedirectPromise) {
-    msalHandleRedirectPromise = getMsalInstance().handleRedirectPromise().catch(() => null);
+    msalHandleRedirectPromise = (async () => {
+      const instance = await getMsalInstance();
+      return instance.handleRedirectPromise();
+    })().catch(() => null);
   }
   await msalHandleRedirectPromise;
 }
 
 function clearStaleMsalInteractionState() {
+  if (typeof window === "undefined") return;
   const clientId = String(import.meta.env.VITE_ENTRA_CLIENT_ID || "").toLowerCase();
   const directKeys = ["msal.interaction.status"];
   if (clientId) {
@@ -182,6 +211,10 @@ function clearStaleMsalInteractionState() {
 
 function mapMicrosoftAuthError(error) {
   const code = String(error?.errorCode || error?.code || "").toLowerCase();
+  const message = String(error?.message || "").toLowerCase();
+  if (message.includes("storage is not defined")) {
+    return new Error("Browser storage is blocked for Microsoft sign-in in this context. Try another browser window.");
+  }
   if (code.includes("user_cancelled")) return new Error("Microsoft sign-in was canceled.");
   if (code.includes("interaction_in_progress")) {
     return new Error("Microsoft sign-in is already in progress. Close extra sign-in windows and try again.");
@@ -194,7 +227,8 @@ function mapMicrosoftAuthError(error) {
 
 async function runMicrosoftPopup({ allowRecovery = true } = {}) {
   try {
-    const result = await getMsalInstance().loginPopup({
+    const instance = await getMsalInstance();
+    const result = await instance.loginPopup({
       scopes: ["openid", "profile", "email", "User.Read"],
       prompt: "select_account",
       redirectUri: getMicrosoftRedirectUri(),

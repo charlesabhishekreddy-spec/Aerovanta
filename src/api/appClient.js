@@ -9,6 +9,57 @@ const MAX_LOGIN_ATTEMPTS = 5;
 const LOCKOUT_MINUTES = 15;
 const PASSWORD_ITERATIONS = 210_000;
 const PASSWORD_MIN_LENGTH = 12;
+const API_BASE = String(import.meta.env.VITE_API_BASE_URL || "/api/v1").replace(/\/+$/, "");
+const CSRF_COOKIE_NAME = String(import.meta.env.VITE_CSRF_COOKIE_NAME || "vv_csrf");
+
+const memoryStore = new Map();
+const makeMemoryStorage = () => ({
+  getItem: (key) => memoryStore.get(key) ?? null,
+  setItem: (key, value) => memoryStore.set(key, value),
+  removeItem: (key) => memoryStore.delete(key),
+  key: (index) => Array.from(memoryStore.keys())[index] ?? null,
+  get length() {
+    return memoryStore.size;
+  },
+});
+
+const getStorage = () => {
+  if (typeof window === "undefined" || !window.localStorage) return makeMemoryStorage();
+  try {
+    const testKey = "__vv_storage_probe__";
+    window.localStorage.setItem(testKey, "1");
+    window.localStorage.removeItem(testKey);
+    return window.localStorage;
+  } catch {
+    return makeMemoryStorage();
+  }
+};
+
+const storage = getStorage();
+const nowIso = () => new Date().toISOString();
+const makeId = () => globalThis.crypto?.randomUUID?.() ?? `id_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
+const getDeviceInfo = () => {
+  if (typeof navigator === "undefined") return "unknown";
+  return [navigator.platform, navigator.userAgent].filter(Boolean).join(" | ").slice(0, 240);
+};
+const readDb = () => {
+  try {
+    const raw = storage.getItem(STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+const writeDb = (value) => {
+  try {
+    storage.setItem(STORAGE_KEY, JSON.stringify(value || {}));
+  } catch {
+    // Ignore storage write failures; API-backed flows still work.
+  }
+};
 
 /* ================= ENTERPRISE SESSION HELPERS ================= */
 
