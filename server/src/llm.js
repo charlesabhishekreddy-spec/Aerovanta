@@ -173,6 +173,131 @@ const weather = async (p) => {
   }
 };
 
+const buildWeatherInsights = (weatherPayload = {}) => {
+  const current = obj(weatherPayload.current) || {};
+  const forecast = Array.isArray(weatherPayload.forecast) ? weatherPayload.forecast : [];
+  const today = forecast[0] || {};
+  const nextThreeDays = forecast.slice(0, 3);
+  const alerts = [];
+
+  const maxWind = nextThreeDays.reduce((mx, day) => Math.max(mx, n(day.wind_speed, 0)), n(current.wind_speed, 0));
+  const maxRainChance = nextThreeDays.reduce(
+    (mx, day) => Math.max(mx, n(day.precipitation_chance, 0)),
+    n(today.precipitation_chance, 0)
+  );
+  const maxRainfall = nextThreeDays.reduce((mx, day) => Math.max(mx, n(day.rainfall, 0)), n(today.rainfall, 0));
+  const minLow = nextThreeDays.reduce((mn, day) => Math.min(mn, n(day.low, 999)), n(today.low, 999));
+
+  if (n(current.temperature, 0) >= 97) {
+    alerts.push({
+      type: "Heat stress risk",
+      severity: n(current.temperature, 0) >= 104 ? "critical" : "high",
+      message: `High temperature around ${Math.round(n(current.temperature, 0))}F can stress crops and reduce pollination.`,
+      action: "Irrigate early morning and postpone foliar sprays in peak heat.",
+    });
+  }
+
+  if (maxRainChance >= 75 || maxRainfall >= 0.8) {
+    alerts.push({
+      type: "Heavy rain window",
+      severity: maxRainChance >= 85 || maxRainfall >= 1.4 ? "high" : "moderate",
+      message: `Rain probability is elevated (${Math.round(maxRainChance)}%) with potential runoff and leaf wetness risk.`,
+      action: "Improve drainage checks and avoid preventive sprays right before rain.",
+    });
+  }
+
+  if (maxWind >= 20) {
+    alerts.push({
+      type: "High wind risk",
+      severity: maxWind >= 28 ? "high" : "moderate",
+      message: `Wind may reach about ${Math.round(maxWind)} mph, reducing spray deposition accuracy.`,
+      action: "Schedule spraying in low-wind morning windows and secure vulnerable plants.",
+    });
+  }
+
+  if (minLow <= 36) {
+    alerts.push({
+      type: "Cold/frost exposure",
+      severity: minLow <= 31 ? "critical" : "high",
+      message: `Forecast low near ${Math.round(minLow)}F may damage sensitive crop tissues.`,
+      action: "Use frost covers and irrigate strategically before coldest period.",
+    });
+  }
+
+  const highHumidity = n(current.humidity, 0) >= 78;
+  const diseaseRiskLevel = highHumidity || maxRainChance >= 65 ? "high" : n(current.humidity, 0) >= 65 ? "moderate" : "low";
+  const rainLikely = maxRainChance >= 60 || maxRainfall >= 0.35;
+  const overall =
+    alerts.some((a) => a.severity === "critical") || alerts.some((a) => a.severity === "high")
+      ? "poor"
+      : rainLikely || maxWind >= 16
+        ? "caution"
+        : "good";
+
+  const irrigationAdvice = rainLikely
+    ? "Reduce irrigation volume and prioritize drainage-prone zones until rain window passes."
+    : "Maintain scheduled irrigation and prioritize early morning cycles for efficiency.";
+  const pestRisk = highHumidity
+    ? "Humidity is elevated; intensify scouting for fungal disease and sap-feeding pests."
+    : "Pest pressure is moderate; maintain routine scouting on lower canopy and new growth.";
+  const taskTiming =
+    maxWind >= 16 || n(current.temperature, 0) >= 95
+      ? "Primary field operations are safest in early morning."
+      : "Morning to mid-day windows are suitable for most field operations.";
+
+  return {
+    alerts: alerts.slice(0, 3),
+    farming_conditions: {
+      overall,
+      irrigation_advice: irrigationAdvice,
+      pest_risk: pestRisk,
+      task_timing: taskTiming,
+    },
+    weather_recommendations: {
+      irrigation: {
+        recommendation: irrigationAdvice,
+        timing: "Early morning",
+        priority: rainLikely ? "high" : "medium",
+      },
+      pest_control: {
+        recommendation: pestRisk,
+        optimal_window: maxWind >= 14 ? "Calm morning window" : "Morning scouting window",
+        priority: diseaseRiskLevel === "high" ? "high" : "medium",
+      },
+      planting_harvesting: {
+        recommendation:
+          overall === "good"
+            ? "Proceed with planting/harvest operations as planned."
+            : "Delay major field operations until wind/rain risk decreases.",
+        timing: overall === "good" ? "Morning to mid-day" : "Early morning only",
+        priority: overall === "good" ? "low" : "medium",
+      },
+      protective_measures:
+        alerts.length > 0
+          ? alerts.map((a) => ({
+              measure: a.type,
+              urgency: a.severity === "critical" ? "high" : a.severity === "high" ? "high" : "medium",
+              reason: a.action,
+            }))
+          : [{ measure: "Routine canopy scouting", urgency: "low", reason: "No critical weather alerts in next 3 days." }],
+      priority_tasks: [
+        "Review next 3-day rainfall and irrigation plan.",
+        "Scout lower canopy and humidity-sensitive zones.",
+        maxWind >= 16 ? "Use low-wind windows for spray operations." : "Proceed with scheduled spray windows.",
+      ],
+      disease_risk: {
+        level: diseaseRiskLevel,
+        reasoning:
+          diseaseRiskLevel === "high"
+            ? "Elevated humidity/rainfall increases leaf wetness duration and disease pressure."
+            : diseaseRiskLevel === "moderate"
+              ? "Conditions are mixed; maintain regular scouting and preventive practices."
+              : "Current humidity and rainfall pattern indicate relatively low disease pressure.",
+      },
+    },
+  };
+};
+
 const schemaType = (s) => {
   const k = getKeys(s);
   if (k.includes("current") && k.includes("forecast")) return "weather";
@@ -825,9 +950,15 @@ export async function buildLlmResponse(payload = {}, options = {}) {
 
   if (type === "weather" || type === "weather_widget" || type === "weather_recs") {
     const w = await weather(prompt);
+    const insights = buildWeatherInsights(w);
     let out = null;
     if (type === "weather") {
-      out = { current: w.current, forecast: w.forecast };
+      out = {
+        current: w.current,
+        forecast: w.forecast,
+        alerts: insights.alerts,
+        farming_conditions: insights.farming_conditions,
+      };
     } else if (type === "weather_widget") {
       out = {
         location_name: w.current.location,
@@ -842,14 +973,7 @@ export async function buildLlmResponse(payload = {}, options = {}) {
         feels_like: w.current.feels_like,
       };
     } else {
-      out = {
-        irrigation: { recommendation: "Adjust irrigation by rainfall probability.", timing: "Early morning", priority: "medium" },
-        pest_control: { recommendation: "Increase scouting in humid windows.", optimal_window: "Low-wind mornings", priority: "medium" },
-        planting_harvesting: { recommendation: "Use morning windows for field operations.", timing: "Morning to mid-day", priority: "low" },
-        protective_measures: [{ measure: "Inspect drainage channels", urgency: "high", reason: "Reduce waterlogging risk." }],
-        priority_tasks: ["Scout lower canopy", "Check irrigation uniformity", "Log weather actions"],
-        disease_risk: { level: w.current.humidity >= 75 ? "high" : "moderate", reasoning: "Humidity and temperature drive pathogen pressure." },
-      };
+      out = insights.weather_recommendations;
     }
     return shape(schema, out);
   }
