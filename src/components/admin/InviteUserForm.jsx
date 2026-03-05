@@ -10,18 +10,23 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export default function InviteUserForm({ onClose }) {
   const [email, setEmail] = useState("");
+  const [invitedEmail, setInvitedEmail] = useState("");
   const [success, setSuccess] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const queryClient = useQueryClient();
 
+  const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+
   const inviteMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (targetEmail) => {
       setErrorMessage("");
-      await appClient.users.inviteUser(email);
+      await appClient.users.inviteUser(targetEmail);
     },
-    onSuccess: () => {
+    onSuccess: (_result, targetEmail) => {
       setSuccess(true);
-      queryClient.invalidateQueries(['all-users']);
+      setInvitedEmail(targetEmail);
+      queryClient.invalidateQueries({ queryKey: ["all-users"] });
+      queryClient.invalidateQueries({ queryKey: ["admin-auth-events"] });
       setTimeout(() => {
         onClose();
       }, 2000);
@@ -33,7 +38,13 @@ export default function InviteUserForm({ onClose }) {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    inviteMutation.mutate();
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    if (!isValidEmail(normalizedEmail)) {
+      setErrorMessage("Enter a valid email address before sending the invite.");
+      return;
+    }
+    setEmail(normalizedEmail);
+    inviteMutation.mutate(normalizedEmail);
   };
 
   return (
@@ -54,7 +65,7 @@ export default function InviteUserForm({ onClose }) {
           <Alert className="bg-green-50 border-green-200">
             <CheckCircle className="h-4 w-4 text-green-600" />
             <AlertDescription className="text-green-800">
-              Invitation sent successfully. Admin rights are reserved only for charlesabhishekreddy@gmail.com.
+              Invitation sent successfully to {invitedEmail || "the selected user"}.
             </AlertDescription>
           </Alert>
         ) : (
@@ -65,7 +76,10 @@ export default function InviteUserForm({ onClose }) {
                 id="email"
                 type="email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  if (errorMessage) setErrorMessage("");
+                }}
                 placeholder="user@example.com"
                 required
                 disabled={inviteMutation.isPending}

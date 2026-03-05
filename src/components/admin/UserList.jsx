@@ -46,8 +46,7 @@ export default function UserList({
     <div className="space-y-3">
       {users.map((user) => {
         const isCurrentUser = user.id === currentUser?.id;
-        const isPrimaryAdmin = user.email?.toLowerCase() === "charlesabhishekreddy@gmail.com";
-        const canEdit = !isCurrentUser && !isPrimaryAdmin;
+        const canEdit = !isCurrentUser;
         const rowUpdating = isUpdating && updatingUserId === user.id;
 
         return (
@@ -66,7 +65,6 @@ export default function UserList({
                   <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="font-semibold text-gray-900">{user.full_name || "Unnamed User"}</h3>
                     {isCurrentUser ? <Badge variant="outline" className="text-xs">You</Badge> : null}
-                    {isPrimaryAdmin ? <Badge variant="outline" className="text-xs">Primary Admin</Badge> : null}
                   </div>
                   <div className="flex items-center gap-4 text-sm text-gray-600 mt-1 flex-wrap">
                     <span className="flex items-center gap-1">
