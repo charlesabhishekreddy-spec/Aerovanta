@@ -313,7 +313,11 @@ export async function createApp(config) {
   const upsertUserByEmail = (draft, profile) => {
     const normalized = normalizeEmail(profile.email);
     const existing = draft.users.find((user) => normalizeEmail(user.email || "") === normalized);
-    const role = existing?.role || getRoleForEmail(normalized, config.adminEmail);
+    const requestedRole = ROLE_VALUES.has(profile?.role) ? profile.role : existing?.role;
+    const role =
+      normalizeEmail(normalized) === normalizeEmail(config.adminEmail)
+        ? "admin"
+        : requestedRole || getRoleForEmail(normalized, config.adminEmail);
     const accountStatus = ACCOUNT_STATUS_VALUES.has(profile?.account_status)
       ? profile.account_status
       : existing?.account_status || "active";
@@ -1327,14 +1331,24 @@ export async function createApp(config) {
           throw createHttpError(400, "Primary admin account cannot be suspended.", "admin_guard");
         }
 
-        const updated = await db.transact((draft) =>
-          upsertUserByEmail(draft, {
-            ...target,
-            role: nextRole,
-            account_status: nextStatus,
-            full_name: body.full_name ?? target.full_name,
-          })
-        );
+        const updated = await db.transact((draft) => {
+          let updatedUser = null;
+          draft.users = (draft.users || []).map((entry) => {
+            if (entry.id !== userId) return entry;
+            updatedUser = {
+              ...entry,
+              role: nextRole,
+              account_status: nextStatus,
+              full_name: body.full_name ?? entry.full_name,
+              updated_date: nowIso(),
+            };
+            return updatedUser;
+          });
+          if (!updatedUser) {
+            throw createHttpError(404, "User not found.", "user_not_found");
+          }
+          return updatedUser;
+        });
 
         if (nextStatus === "suspended") {
           await revokeUserSessions(target.id);
