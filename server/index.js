@@ -49,6 +49,7 @@ const app = await createApp(config);
 const maskKey = (value = "") => {
   const key = String(value || "").trim();
   if (!key) return "not set";
+  if (config.isProduction) return "set";
   if (key.length <= 8) return "set";
   return `${key.slice(0, 4)}...${key.slice(-4)}`;
 };
