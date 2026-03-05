@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Plus, Calendar as CalendarIcon, BarChart3, AlertCircle, Loader2 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import TaskList from "../components/schedule/TaskList.jsx";
 import TaskForm from "../components/schedule/TaskForm.jsx";
 import TaskStats from "../components/schedule/TaskStats.jsx";
@@ -249,19 +250,27 @@ export default function Schedule() {
 
       <AITaskSuggestions />
 
-      {showForm && (
-        <TaskForm
-          task={editingTask}
-          allTasks={tasks}
-          users={assignableUsers}
-          onSubmit={handleSubmit}
-          onCancel={() => {
-            setShowForm(false);
-            setEditingTask(null);
-          }}
-          isLoading={createMutation.isPending || updateMutation.isPending}
-        />
-      )}
+      <Dialog
+        open={showForm}
+        onOpenChange={(open) => {
+          setShowForm(open);
+          if (!open) setEditingTask(null);
+        }}
+      >
+        <DialogContent className="max-h-[92vh] max-w-5xl overflow-y-auto border-none bg-transparent p-0 shadow-none [&>button]:hidden">
+          <TaskForm
+            task={editingTask}
+            allTasks={tasks}
+            users={assignableUsers}
+            onSubmit={handleSubmit}
+            onCancel={() => {
+              setShowForm(false);
+              setEditingTask(null);
+            }}
+            isLoading={createMutation.isPending || updateMutation.isPending}
+          />
+        </DialogContent>
+      </Dialog>
 
       <Card className="border-none shadow-lg">
         <CardHeader className="border-b">
