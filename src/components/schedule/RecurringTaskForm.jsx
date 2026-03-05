@@ -9,12 +9,12 @@ export default function RecurringTaskForm({ formData, setFormData }) {
       <div className="flex items-center gap-2">
         <Checkbox
           id="recurring"
-          checked={formData.is_recurring}
+          checked={Boolean(formData.is_recurring)}
           onCheckedChange={(checked) => 
             setFormData({ 
               ...formData, 
-              is_recurring: checked,
-              recurrence_pattern: checked ? 'weekly' : undefined,
+              is_recurring: Boolean(checked),
+              recurrence_pattern: checked ? formData.recurrence_pattern || 'weekly' : undefined,
               recurrence_end_date: checked ? formData.recurrence_end_date : undefined
             })
           }
@@ -29,7 +29,7 @@ export default function RecurringTaskForm({ formData, setFormData }) {
           <div className="space-y-2">
             <Label>Recurrence Pattern</Label>
             <Select
-              value={formData.recurrence_pattern}
+              value={formData.recurrence_pattern || "weekly"}
               onValueChange={(value) => setFormData({ ...formData, recurrence_pattern: value })}
             >
               <SelectTrigger>
