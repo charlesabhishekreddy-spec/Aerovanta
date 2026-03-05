@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { appClient } from "@/api/appClient";
 import { useAuth } from "@/lib/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -7,24 +7,47 @@ export default function DeviceSessions() {
   const { user } = useAuth();
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
 
-  const load = async () => {
-    if (!user?.email) return;
-    const data = await appClient.enterprise.listSessions(user.email);
-    setSessions(data);
+  const formatDate = (value) => {
+    if (!value) return "Unknown";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleString();
   };
+
+  const load = useCallback(async () => {
+    if (!user?.email) {
+      setSessions([]);
+      setErrorMessage("");
+      return;
+    }
+
+    setLoading(true);
+    setErrorMessage("");
+    try {
+      const data = await appClient.enterprise.listSessions(user.email);
+      setSessions(Array.isArray(data) ? data : []);
+    } catch (error) {
+      setErrorMessage(error?.message || "Failed to load active sessions.");
+    } finally {
+      setLoading(false);
+    }
+  }, [user?.email]);
 
   useEffect(() => {
     load();
-     
-  }, [user?.email]);
+  }, [load]);
 
   const logoutOthers = async () => {
     if (!user?.email) return;
     setLoading(true);
+    setErrorMessage("");
     try {
       await appClient.enterprise.logoutOtherDevices(user.email);
       await load();
+    } catch (error) {
+      setErrorMessage(error?.message || "Failed to log out other devices.");
     } finally {
       setLoading(false);
     }
@@ -43,7 +66,18 @@ export default function DeviceSessions() {
         </Button>
       </div>
 
-      {sessions.length === 0 ? (
+      {errorMessage ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 flex items-center justify-between gap-3">
+          <span>{errorMessage}</span>
+          <Button type="button" variant="outline" size="sm" onClick={load}>
+            Retry
+          </Button>
+        </div>
+      ) : null}
+
+      {loading && sessions.length === 0 ? (
+        <p className="text-sm text-slate-500">Loading sessions...</p>
+      ) : sessions.length === 0 ? (
         <p className="text-sm text-slate-500">No session data yet.</p>
       ) : (
         <div className="space-y-3">
@@ -68,11 +102,11 @@ export default function DeviceSessions() {
                 {s.device_info?.userAgent || "Unknown user agent"}
               </div>
               <div className="text-xs text-slate-400 mt-2">
-                Last active: {s.last_active}
+                Last active: {formatDate(s.last_active)}
               </div>
               {s.expires_at ? (
                 <div className="text-xs text-slate-400 mt-1">
-                  Expires: {s.expires_at}
+                  Expires: {formatDate(s.expires_at)}
                 </div>
               ) : null}
             </div>
