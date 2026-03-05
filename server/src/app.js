@@ -335,6 +335,10 @@ export async function createApp(config) {
   const db = new JsonDatabase(config.dbFile, config.adminEmail);
   await db.init();
   await mkdir(config.uploadDir, { recursive: true });
+  const uploadBodyLimitBytes = Math.max(
+    config.requestLimits.jsonBodyBytes,
+    Math.ceil(config.requestLimits.uploadBytes * 1.37)
+  );
 
   if (config.adminBootstrapPassword) {
     await db.transact(async (draft) => {
@@ -1488,7 +1492,7 @@ export async function createApp(config) {
         if (!context) return;
         if (!requireCsrf(req, res, context)) return;
         const body = await readJsonBody(req, config.requestLimits.jsonBodyBytes);
-        const prompt = String(body.prompt || "").trim();
+        const prompt = sanitizeTextValue(body.prompt, 4000);
         const fileUrls = Array.isArray(body.file_urls)
           ? body.file_urls
             .filter((item) => typeof item === "string" && item.trim())
@@ -1572,7 +1576,16 @@ ${prompt || "Analyze the attached crop image and provide guidance."}`;
         if (!context) return;
         if (!requireCsrf(req, res, context)) return;
         const body = await readJsonBody(req, config.requestLimits.jsonBodyBytes);
-        const result = await buildLlmResponse(body, {
+        const llmPayload = isObject(body) ? { ...body } : {};
+        if (hasOwn(llmPayload, "prompt")) {
+          llmPayload.prompt = sanitizeTextValue(llmPayload.prompt, 12_000);
+        }
+        if (Array.isArray(llmPayload.file_urls)) {
+          llmPayload.file_urls = llmPayload.file_urls
+            .filter((item) => typeof item === "string" && item.trim())
+            .slice(0, 2);
+        }
+        const result = await buildLlmResponse(llmPayload, {
           ai: config.ai,
           uploadDir: config.uploadDir,
           uploadsPublicPath: config.uploadsPublicPath,
@@ -1586,7 +1599,7 @@ ${prompt || "Analyze the attached crop image and provide guidance."}`;
         if (!context) return;
         if (!requireCsrf(req, res, context)) return;
 
-        const body = await readJsonBody(req, config.requestLimits.jsonBodyBytes);
+        const body = await readJsonBody(req, uploadBodyLimitBytes);
         const fileName = String(body.file_name || "upload");
         const fileType = String(body.file_type || "").toLowerCase();
         const base64 = String(body.content_base64 || "")
