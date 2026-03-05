@@ -185,52 +185,170 @@ const deriveSeverity = (infectionLevel) => {
   return "critical";
 };
 
+const toPercent = (value, fallback = 0) => {
+  let parsed = toNumber(value, fallback);
+  if (parsed >= 0 && parsed <= 1) {
+    parsed *= 100;
+  }
+  return clamp(Math.round(parsed), 0, 100);
+};
+
+const inferDiseaseType = (diseaseName, diseaseTypeHint) => {
+  const explicit = normalizeText(diseaseTypeHint);
+  if (explicit && explicit !== "uncertain") return explicit;
+
+  const disease = normalizeText(diseaseName);
+  if (!disease || disease.includes("healthy") || disease.includes("no disease")) return "none";
+  if (
+    disease.includes("rust") ||
+    disease.includes("blight") ||
+    disease.includes("mildew") ||
+    disease.includes("mold") ||
+    disease.includes("spot") ||
+    disease.includes("scab") ||
+    disease.includes("anthracnose") ||
+    disease.includes("rot")
+  ) {
+    return "fungal";
+  }
+  if (disease.includes("canker") || disease.includes("bacterial")) return "bacterial";
+  if (disease.includes("virus") || disease.includes("mosaic") || disease.includes("viroid")) return "viral";
+  if (
+    disease.includes("nutrient") ||
+    disease.includes("deficiency") ||
+    disease.includes("stress") ||
+    disease.includes("sunscald") ||
+    disease.includes("edema")
+  ) {
+    return "physiological";
+  }
+  if (
+    disease.includes("aphid") ||
+    disease.includes("thrip") ||
+    disease.includes("mite") ||
+    disease.includes("insect") ||
+    disease.includes("pest")
+  ) {
+    return "pest_related";
+  }
+  return "uncertain";
+};
+
+const buildProbableCauses = ({ diseaseType, symptoms = [] }) => {
+  const causes = [];
+  if (diseaseType === "fungal") {
+    causes.push("Prolonged leaf wetness and elevated humidity.");
+    causes.push("Poor canopy airflow increasing moisture retention.");
+  } else if (diseaseType === "bacterial") {
+    causes.push("Rain splash or wound-based bacterial entry on tender tissue.");
+    causes.push("Tool or handling transmission between plants.");
+  } else if (diseaseType === "viral") {
+    causes.push("Vector transmission from insects such as aphids or whiteflies.");
+    causes.push("Infected plant material or volunteer hosts nearby.");
+  } else if (diseaseType === "physiological") {
+    causes.push("Nutrient imbalance or uneven nutrient uptake.");
+    causes.push("Irrigation stress or abrupt weather stress exposure.");
+  }
+
+  const symptomText = symptoms.map((item) => normalizeText(item)).join(" ");
+  if (symptomText.includes("yellow") || symptomText.includes("chlorosis")) {
+    causes.push("Chlorosis pattern indicates nutrient or vascular stress.");
+  }
+  if (symptomText.includes("lesion") || symptomText.includes("spot")) {
+    causes.push("Lesion progression suggests active tissue damage on foliage.");
+  }
+
+  return causes.filter(Boolean).slice(0, 4);
+};
+
+const buildImmediateActions = ({ diseaseType, isHealthy, symptoms = [] }) => {
+  if (isHealthy) {
+    return [
+      "Continue routine scouting every 3-4 days.",
+      "Maintain balanced irrigation and nutrient schedule.",
+      "Re-scan if visible lesions or discoloration develop.",
+    ];
+  }
+
+  const actions = [
+    "Isolate or mark affected plants/rows for targeted monitoring.",
+    "Remove heavily affected leaves to reduce spread pressure.",
+    "Avoid overhead irrigation during active lesion periods.",
+  ];
+
+  if (diseaseType === "fungal") {
+    actions.unshift("Start preventive fungicide rotation based on crop label and resistance group guidance.");
+  } else if (diseaseType === "bacterial") {
+    actions.unshift("Begin bactericide-compatible program where local regulations permit.");
+  } else if (diseaseType === "viral") {
+    actions.unshift("Prioritize vector control and rogue severely infected plants.");
+  } else if (diseaseType === "physiological") {
+    actions.unshift("Correct irrigation and nutrition before applying chemical controls.");
+  }
+
+  if (!symptoms.length) {
+    actions.push("Capture a closer image in daylight for stronger symptom evidence.");
+  }
+
+  return actions.slice(0, 5);
+};
+
 const normalizeDiagnosis = (raw = {}) => {
-  const plantNameHint = toText(raw.plant_name ?? raw.plantName, "");
+  const plantNameHint = toText(raw.plant_name ?? raw.plantName ?? raw.plant, "");
   const isPlantHint = normalizeText(plantNameHint);
   const isPlant =
     Boolean(raw.is_plant ?? raw.isPlant ?? true) &&
     !["not a plant", "non-plant", "not plant", "not applicable"].includes(isPlantHint);
 
-  const diseaseText = toText(raw.disease_name ?? raw.disease, "").toLowerCase();
-  const diseaseType = toText(raw.disease_type, "uncertain").toLowerCase();
+  const diseaseName = toText(raw.disease_name ?? raw.disease ?? raw.diseaseName, "");
+  const diseaseText = diseaseName.toLowerCase();
+  const diseaseType = inferDiseaseType(diseaseName, raw.disease_type ?? raw.diseaseType);
   const inferredHealthy =
     diseaseText.includes("no disease") ||
     diseaseText.includes("healthy") ||
     diseaseType === "none";
   const isHealthy = Boolean(raw.is_healthy ?? raw.isHealthy) || inferredHealthy;
+  const symptoms = toStringArray(raw.symptoms ?? raw.visibleSymptoms ?? raw.keySymptoms);
 
-  const confidenceRaw = raw.confidence_score ?? raw.confidence ?? (isPlant ? (isHealthy ? 78 : 72) : 25);
-  const confidence = clamp(Math.round(toNumber(confidenceRaw, 0)), 0, 100);
-  const infectionLevel = clamp(Math.round(toNumber(raw.infection_level ?? raw.infectionLevel, 0)), 0, 100);
+  const confidenceDefault = isPlant ? (isHealthy ? 82 : symptoms.length > 0 ? 76 : 68) : 22;
+  const confidence = toPercent(raw.confidence_score ?? raw.confidence ?? raw.confidenceScore, confidenceDefault);
+  const infectionLevel = toPercent(raw.infection_level ?? raw.infectionLevel, 0);
+  const probableCausesInput = toStringArray(raw.probable_causes ?? raw.probableCauses);
+  const probableCauses =
+    probableCausesInput.length > 0 ? probableCausesInput : buildProbableCauses({ diseaseType, symptoms });
+  const immediateActionsInput = toStringArray(raw.immediate_actions ?? raw.immediateActions);
+  const immediateActions =
+    immediateActionsInput.length > 0
+      ? immediateActionsInput
+      : buildImmediateActions({ diseaseType, isHealthy, symptoms });
 
   const requiresManualReview =
-    Boolean(raw.requires_manual_review) ||
+    Boolean(raw.requires_manual_review ?? raw.requiresManualReview) ||
     !isPlant ||
-    diseaseType === "uncertain" ||
+    (!isHealthy && diseaseType === "uncertain") ||
     confidence < MIN_RELIABLE_CONFIDENCE;
 
   return {
     is_plant: isPlant,
-    plant_name: isPlant ? toText(raw.plant_name ?? raw.plantName, "Unknown plant") : "Not a plant",
-    scientific_name: isPlant ? toText(raw.scientific_name, "Unknown") : "N/A",
+    plant_name: isPlant ? toText(raw.plant_name ?? raw.plantName ?? raw.plant, "Unknown plant") : "Not a plant",
+    scientific_name: isPlant ? toText(raw.scientific_name ?? raw.scientificName, "Unknown") : "N/A",
     disease_name: isPlant
       ? isHealthy
         ? "Healthy - No Disease Detected"
-        : toText(raw.disease_name ?? raw.disease, "Uncertain disease pattern")
+        : toText(diseaseName, "Uncertain disease pattern")
       : "Non-plant image",
     disease_type: isPlant ? diseaseType : "non_plant",
     infection_level: isPlant && !isHealthy ? infectionLevel : 0,
     severity: isPlant && !isHealthy ? deriveSeverity(infectionLevel) : "low",
     confidence_score: confidence,
-    symptoms: toStringArray(raw.symptoms ?? raw.visibleSymptoms),
+    symptoms,
     pathogen_signs: toStringArray(raw.pathogen_signs),
     is_healthy: isPlant ? isHealthy : false,
     requires_manual_review: requiresManualReview,
-    diagnosis_notes: toText(raw.diagnosis_notes ?? raw.diagnosisNotes, ""),
-    probable_causes: toStringArray(raw.probable_causes),
-    immediate_actions: toStringArray(raw.immediate_actions),
-    rejection_reason: !isPlant ? toText(raw.rejection_reason, "The uploaded image is not a plant image.") : "",
+    diagnosis_notes: toText(raw.diagnosis_notes ?? raw.diagnosisNotes ?? raw.analysis_notes, ""),
+    probable_causes: probableCauses,
+    immediate_actions: immediateActions,
+    rejection_reason: !isPlant ? toText(raw.rejection_reason ?? raw.rejectionReason, "The uploaded image is not a plant image.") : "",
   };
 };
 
@@ -255,7 +373,9 @@ Known crops in this tenant (for context only):
 ${plantReference || "No local plant database provided."}
 
 Provide the response as strict JSON with these keys:
-plantName, disease, infectionLevel, isPlant, confidence, symptoms, diagnosisNotes
+plantName, disease, diseaseType, infectionLevel, isPlant, confidence, symptoms, diagnosisNotes, probableCauses, immediateActions
+
+Confidence must be a numeric score between 0 and 100 (not 0-1).
 
 Return 0 for infectionLevel if no disease is detected.`;
 
@@ -269,11 +389,14 @@ const buildOpenAiResponseSchema = () => ({
       properties: {
         plantName: { type: "string" },
         disease: { type: "string" },
+        diseaseType: { type: "string" },
         infectionLevel: { type: "number" },
         isPlant: { type: "boolean" },
         confidence: { type: "number" },
         symptoms: { type: "array", items: { type: "string" } },
         diagnosisNotes: { type: "string" },
+        probableCauses: { type: "array", items: { type: "string" } },
+        immediateActions: { type: "array", items: { type: "string" } },
       },
       required: ["plantName", "disease", "infectionLevel"],
       additionalProperties: true,
