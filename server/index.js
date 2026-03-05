@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { createApp } from "./src/app.js";
-import { loadConfig } from "./src/config.js";
+import { loadConfig, validateConfig } from "./src/config.js";
 
 const parseEnvLine = (line) => {
   const text = String(line || "").trim();
@@ -44,6 +44,18 @@ const loadLocalEnvFiles = () => {
 loadLocalEnvFiles();
 
 const config = loadConfig();
+const validation = validateConfig(config);
+if (validation.warnings.length > 0) {
+  validation.warnings.forEach((warning) => {
+    console.warn(`[api] config warning: ${warning}`);
+  });
+}
+if (validation.errors.length > 0) {
+  validation.errors.forEach((errorMessage) => {
+    console.error(`[api] config error: ${errorMessage}`);
+  });
+  process.exit(1);
+}
 const app = await createApp(config);
 
 const maskKey = (value = "") => {
@@ -77,11 +89,18 @@ const startServer = async () => {
     const protocol = config.tls.enabled ? "https" : "http";
     const baseUrl = `${protocol}://${config.host}:${config.port}`;
     console.log(`[api] running on ${baseUrl}${config.apiPrefix}`);
+    console.log(`[api] health checks liveness=${config.apiPrefix}/healthz readiness=${config.apiPrefix}/readyz`);
     console.log(
       `[api] ai provider=${config.ai.provider} geminiModel=${config.ai.geminiModel} openAiModel=${config.ai.openAiModel}`
     );
     console.log(
       `[api] keys gemini=${maskKey(config.ai.geminiApiKey)} openai=${maskKey(config.ai.openAiApiKey)}`
+    );
+    console.log(
+      `[api] security trustProxy=${config.trustProxy} forceHttps=${config.forceHttps} cookieSecure=${config.cookies.secure} sameSite=${config.cookies.sameSite}`
+    );
+    console.log(
+      `[api] cors allowedOrigins=${config.allowedOrigins.join(", ") || "(none)"} rateLimitBackend=${config.rateLimits.backend}`
     );
     if (!config.tls.enabled) {
       console.log("[api] TLS is disabled. Use HTTPS via reverse proxy for production.");

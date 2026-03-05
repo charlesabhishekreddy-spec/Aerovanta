@@ -3,6 +3,7 @@ import process from "node:process";
 
 const DEFAULT_ALLOWED_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"];
 const DEFAULT_ADMIN_EMAIL = "charlesabhishekreddy@gmail.com";
+const PLACEHOLDER_SECRETS = new Set(["", "your_real_key", "changeme", "replace_me"]);
 
 const toInt = (value, fallback) => {
   const parsed = Number.parseInt(String(value ?? ""), 10);
@@ -31,6 +32,8 @@ const toText = (value, fallback = "") => {
   return text || fallback;
 };
 
+const normalizeOrigin = (value) => String(value || "").trim().replace(/\/+$/, "");
+
 const toSameSite = (value, fallback = "Lax") => {
   const normalized = String(value ?? "").trim().toLowerCase();
   if (normalized === "strict") return "Strict";
@@ -47,6 +50,7 @@ const resolveFromRoot = (value) => {
 export function loadConfig(env = process.env) {
   const nodeEnv = env.NODE_ENV || "development";
   const isProduction = nodeEnv === "production";
+  const trustProxy = toBool(env.TRUST_PROXY, isProduction);
 
   const dataDir = resolveFromRoot(env.API_DATA_DIR || "server/data");
   const uploadDir = resolveFromRoot(env.API_UPLOAD_DIR || "server/uploads");
@@ -57,17 +61,26 @@ export function loadConfig(env = process.env) {
 
   const sessionCookieName = env.SESSION_COOKIE_NAME || "vv_session";
   const csrfCookieName = env.CSRF_COOKIE_NAME || "vv_csrf";
+  const allowedOrigins = Array.from(
+    new Set(
+      toList(env.CORS_ORIGINS, DEFAULT_ALLOWED_ORIGINS)
+        .map((origin) => normalizeOrigin(origin))
+        .filter(Boolean)
+    )
+  );
+  const rateLimiterBackend = toText(env.RATE_LIMIT_BACKEND, "memory").toLowerCase();
 
   return {
     nodeEnv,
     isProduction,
+    trustProxy,
     host: env.API_HOST || "127.0.0.1",
     port: toInt(env.API_PORT, 5000),
     apiPrefix: env.API_PREFIX || "/api/v1",
-    forceHttps: toBool(env.FORCE_HTTPS, false),
+    forceHttps: toBool(env.FORCE_HTTPS, isProduction),
     allowSocialProfileOnly: toBool(env.ALLOW_SOCIAL_PROFILE_ONLY, !isProduction),
     exposeResetDebugUrl: toBool(env.EXPOSE_RESET_DEBUG_URL, !isProduction),
-    allowedOrigins: toList(env.CORS_ORIGINS, DEFAULT_ALLOWED_ORIGINS),
+    allowedOrigins,
     adminEmail: String(env.ADMIN_EMAIL || DEFAULT_ADMIN_EMAIL).trim().toLowerCase(),
     adminBootstrapPassword: String(env.ADMIN_BOOTSTRAP_PASSWORD || ""),
     dataDir,
@@ -95,6 +108,8 @@ export function loadConfig(env = process.env) {
       path: "/",
     },
     rateLimits: {
+      backend: rateLimiterBackend,
+      allowInMemoryInProduction: toBool(env.ALLOW_IN_MEMORY_RATE_LIMITER, false),
       general: {
         windowMs: toInt(env.RATE_LIMIT_WINDOW_MS, 60_000),
         max: toInt(env.RATE_LIMIT_MAX, 240),
@@ -126,4 +141,66 @@ export function loadConfig(env = process.env) {
       certPath: tlsCertPath,
     },
   };
+}
+
+const hasSecret = (value) => !PLACEHOLDER_SECRETS.has(String(value || "").trim().toLowerCase());
+
+export function validateConfig(config) {
+  const errors = [];
+  const warnings = [];
+  const allowedOrigins = Array.isArray(config.allowedOrigins) ? config.allowedOrigins : [];
+
+  if (config.cookies.sameSite === "None" && !config.cookies.secure) {
+    errors.push("SESSION_COOKIE_SAMESITE=None requires SESSION_COOKIE_SECURE=true.");
+  }
+
+  if (config.isProduction) {
+    if (!config.forceHttps) {
+      errors.push("FORCE_HTTPS must be true in production.");
+    }
+    if (!config.cookies.secure) {
+      errors.push("SESSION_COOKIE_SECURE must be true in production.");
+    }
+    if (config.exposeResetDebugUrl) {
+      errors.push("EXPOSE_RESET_DEBUG_URL must be false in production.");
+    }
+    if (config.allowSocialProfileOnly) {
+      errors.push("ALLOW_SOCIAL_PROFILE_ONLY must be false in production.");
+    }
+    if (allowedOrigins.length === 0) {
+      errors.push("CORS_ORIGINS must include at least one trusted frontend origin in production.");
+    }
+    if (allowedOrigins.some((origin) => /^http:\/\//i.test(origin))) {
+      errors.push("CORS_ORIGINS must use HTTPS origins in production.");
+    }
+    if (allowedOrigins.some((origin) => /(localhost|127\.0\.0\.1)/i.test(origin))) {
+      errors.push("CORS_ORIGINS contains localhost/127.0.0.1, which is not valid for production.");
+    }
+    if (!config.tls.enabled && !config.trustProxy) {
+      errors.push("Enable TLS directly or set TRUST_PROXY=true behind a secure reverse proxy.");
+    }
+    if (config.rateLimits.backend === "memory" && !config.rateLimits.allowInMemoryInProduction) {
+      errors.push(
+        "In production, memory rate limiting is insufficient for multi-instance deployment. Use a shared rate-limiter or set ALLOW_IN_MEMORY_RATE_LIMITER=true only for single-instance deployment."
+      );
+    }
+    if (config.adminBootstrapPassword) {
+      warnings.push("ADMIN_BOOTSTRAP_PASSWORD is set. Remove it after initial bootstrap.");
+    }
+    if (!hasSecret(config.ai.geminiApiKey) && !hasSecret(config.ai.openAiApiKey)) {
+      warnings.push("No AI provider API key is configured. AI features will degrade or fail.");
+    }
+    if (/server[\\/]+data[\\/]+db\.json$/i.test(String(config.dbFile || ""))) {
+      warnings.push("API_DB_FILE points to local filesystem JSON storage. Use managed database storage for production resilience.");
+    }
+    if (/server[\\/]+uploads[\\/]*$/i.test(String(config.uploadDir || ""))) {
+      warnings.push("API_UPLOAD_DIR points to local filesystem uploads. Use cloud object storage for production durability.");
+    }
+  }
+
+  if (config.rateLimits.backend !== "memory") {
+    warnings.push(`RATE_LIMIT_BACKEND=${config.rateLimits.backend} is declared, but only memory backend is currently implemented.`);
+  }
+
+  return { errors, warnings };
 }
