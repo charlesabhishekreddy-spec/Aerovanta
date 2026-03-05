@@ -293,10 +293,16 @@ export const appClient = {
   },
 
   ai: {
-    async getFarmAdvice(prompt) {
+    async getFarmAdvice(payload = {}) {
+      const body =
+        typeof payload === "string"
+          ? { prompt: payload }
+          : payload && typeof payload === "object"
+            ? payload
+            : { prompt: "" };
       return request("/ai/farm-advice", {
         method: "POST",
-        body: { prompt },
+        body,
       });
     },
 

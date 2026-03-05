@@ -1376,8 +1376,47 @@ export async function createApp(config) {
         if (!context) return;
         if (!requireCsrf(req, res, context)) return;
         const body = await readJsonBody(req, config.requestLimits.jsonBodyBytes);
+        const prompt = String(body.prompt || "").trim();
+        const fileUrls = Array.isArray(body.file_urls)
+          ? body.file_urls
+            .filter((item) => typeof item === "string" && item.trim())
+            .slice(0, 2)
+          : [];
+        const conversation = Array.isArray(body.conversation)
+          ? body.conversation
+            .map((entry) => ({
+              role: String(entry?.role || "").toLowerCase() === "assistant" ? "Assistant" : "User",
+              content: String(entry?.content || "").replace(/\s+/g, " ").trim().slice(0, 1200),
+            }))
+            .filter((entry) => entry.content)
+            .slice(-12)
+          : [];
+        const locale = String(body.locale || "en-US").slice(0, 40);
+
+        if (!prompt && fileUrls.length === 0) {
+          throw createHttpError(400, "Prompt or image is required.", "invalid_prompt");
+        }
+
+        const composedPrompt = `You are Verdent Vision AI Farming Assistant.
+Provide practical, crop-safe advice for farmers and growers.
+Rules:
+- Be accurate, concise, and actionable.
+- If uncertain, say what is uncertain and ask one clarifying question.
+- Prefer integrated pest management and safety-first recommendations.
+- Include dosage/frequency only if broadly safe; remind user to follow local labels/regulations.
+- Use markdown with short sections and bullets.
+
+User locale: ${locale}
+Current UTC date: ${new Date().toISOString().slice(0, 10)}
+
+Recent conversation:
+${conversation.map((entry) => `${entry.role}: ${entry.content}`).join("\n") || "None"}
+
+Current user request:
+${prompt || "Analyze the attached crop image and provide guidance."}`;
+
         const result = await buildLlmResponse(
-          { prompt: String(body.prompt || "") },
+          { prompt: composedPrompt, file_urls: fileUrls },
           {
             ai: config.ai,
             uploadDir: config.uploadDir,
