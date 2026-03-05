@@ -1,6 +1,11 @@
 const API_BASE = String(import.meta.env.VITE_API_BASE_URL || "/api/v1").replace(/\/+$/, "");
 const CSRF_COOKIE_NAME = String(import.meta.env.VITE_CSRF_COOKIE_NAME || "vv_csrf");
 const DEVICE_KEY = "verdent_device_id";
+const REQUEST_TIMEOUT_MS = (() => {
+  const parsed = Number.parseInt(String(import.meta.env.VITE_API_TIMEOUT_MS || ""), 10);
+  if (!Number.isFinite(parsed)) return 20_000;
+  return Math.min(Math.max(parsed, 3_000), 120_000);
+})();
 
 const memoryStore = new Map();
 const getStorage = () => {
@@ -58,7 +63,7 @@ const toBase64 = (file) =>
     reader.readAsDataURL(file);
   });
 
-const request = async (path, { method = "GET", body, useCsrf = true } = {}) => {
+const request = async (path, { method = "GET", body, useCsrf = true, signal } = {}) => {
   const headers = {
     Accept: "application/json",
     "X-Device-Id": getDeviceId(),
@@ -75,15 +80,30 @@ const request = async (path, { method = "GET", body, useCsrf = true } = {}) => {
   }
 
   let response;
+  const timeoutController = new AbortController();
+  const timeoutHandle = setTimeout(() => timeoutController.abort(), REQUEST_TIMEOUT_MS);
+  if (signal?.aborted) {
+    clearTimeout(timeoutHandle);
+    throw new Error("Request was cancelled.");
+  }
+  const abortFromExternalSignal = () => timeoutController.abort();
+  signal?.addEventListener?.("abort", abortFromExternalSignal, { once: true });
   try {
     response = await fetch(`${API_BASE}${path}`, {
       method: upperMethod,
       credentials: "include",
       headers,
+      signal: timeoutController.signal,
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
-  } catch {
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error(`Request timed out after ${Math.round(REQUEST_TIMEOUT_MS / 1000)}s.`);
+    }
     throw new Error("Unable to connect to API server.");
+  } finally {
+    clearTimeout(timeoutHandle);
+    signal?.removeEventListener?.("abort", abortFromExternalSignal);
   }
 
   const payload = await readJsonSafe(response);
