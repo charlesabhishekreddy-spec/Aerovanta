@@ -1,4 +1,5 @@
 const textEncoder = new TextEncoder();
+const MAX_PBKDF2_ITERATIONS = 100000;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const safeParseJson = (value, fallback = null) => {
@@ -79,7 +80,7 @@ const derivePasswordHash = async (password, saltHex, iterations) => {
     {
       name: "PBKDF2",
       salt: fromHex(saltHex),
-      iterations: Number(iterations || 210000),
+      iterations: Math.min(Number(iterations || 100000), MAX_PBKDF2_ITERATIONS),
       hash: "SHA-256",
     },
     keyMaterial,
@@ -94,7 +95,7 @@ const makePasswordRecord = async (password, iterations) => {
   return {
     password_hash,
     password_salt,
-    password_iterations: Number(iterations || 210000),
+    password_iterations: Math.min(Number(iterations || 100000), MAX_PBKDF2_ITERATIONS),
   };
 };
 
@@ -121,7 +122,10 @@ export const sanitizeUser = (user) => {
 
 const getSessionCookieName = (env) => String(env.SESSION_COOKIE_NAME || "vv_session");
 const getCsrfCookieName = (env) => String(env.CSRF_COOKIE_NAME || "vv_csrf");
-const getPasswordIterations = (env) => Number.parseInt(String(env.PASSWORD_ITERATIONS || "210000"), 10) || 210000;
+const getPasswordIterations = (env) => {
+  const requested = Number.parseInt(String(env.PASSWORD_ITERATIONS || "100000"), 10) || 100000;
+  return Math.min(Math.max(requested, 10000), MAX_PBKDF2_ITERATIONS);
+};
 const getPasswordMinLength = (env) => Number.parseInt(String(env.PASSWORD_MIN_LENGTH || "12"), 10) || 12;
 const getRememberDays = (env) => Number.parseInt(String(env.REMEMBER_SESSION_DAYS || "30"), 10) || 30;
 const getSessionHours = (env) => Number.parseInt(String(env.DEFAULT_SESSION_HOURS || "8"), 10) || 8;
