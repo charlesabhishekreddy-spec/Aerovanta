@@ -145,9 +145,16 @@ const serializeCookie = (name, value, options = {}) => {
   return parts.join("; ");
 };
 
+const getCookieSameSite = (env) => {
+  const requested = String(env.SESSION_COOKIE_SAMESITE || "None").trim();
+  if (/^strict$/i.test(requested)) return "Strict";
+  if (/^lax$/i.test(requested)) return "Lax";
+  return "None";
+};
+
 const cookieOptions = (env, maxAge) => ({
   path: "/",
-  sameSite: "Lax",
+  sameSite: getCookieSameSite(env),
   secure: String(env.FORCE_HTTPS || "true").toLowerCase() === "true",
   maxAge,
 });
