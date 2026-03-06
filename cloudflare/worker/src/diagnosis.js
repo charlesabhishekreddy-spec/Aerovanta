@@ -349,7 +349,7 @@ const buildOpenAiResponseSchema = () => ({
 
 const makeOpenAiCallError = (status, detailText = "") => {
   const details = parseOpenAiError(detailText);
-  if (status === 401 || status === 403) {
+  if (status === 401 || status === 403 || isGeminiAuthError(details)) {
     return createHttpError(502, details.message || "Diagnosis AI authentication failed. Check OPENAI_API_KEY and model access.", "ai_auth_failed");
   }
   if (status === 429) {
@@ -366,7 +366,7 @@ const makeOpenAiCallError = (status, detailText = "") => {
 
 const makeGeminiCallError = (status, detailText = "") => {
   const details = parseGeminiError(detailText);
-  if (status === 401 || status === 403) {
+  if (status === 401 || status === 403 || isGeminiAuthError(details)) {
     return createHttpError(502, details.message || "Gemini authentication failed. Check GEMINI_API_KEY and model access.", "ai_auth_failed");
   }
   if (status === 429 || details.status === "RESOURCE_EXHAUSTED") {
@@ -609,3 +609,4 @@ export const diagnosePlantImage = async ({ fileUrl, env }) => {
     confidence_threshold: MIN_RELIABLE_CONFIDENCE,
   };
 };
+
