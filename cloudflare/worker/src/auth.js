@@ -1,3 +1,4 @@
+import { writeAuthEvent } from "./audit.js";
 const textEncoder = new TextEncoder();
 const MAX_PBKDF2_ITERATIONS = 100000;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -428,6 +429,7 @@ export const signInWithEmail = async (request, env, payload = {}) => {
   const headers = new Headers();
   appendAuthCookies(headers, env, sessionRecord.token, sessionRecord.csrfToken, remember);
   headers.set("x-csrf-token", sessionRecord.csrfToken);
+  await writeAuthEvent(env, "login_email", updatedUser.email, { remember: Boolean(remember) });
   return {
     ok: true,
     status: 200,
@@ -495,6 +497,7 @@ export const registerWithEmail = async (request, env, payload = {}) => {
   const headers = new Headers();
   appendAuthCookies(headers, env, sessionRecord.token, sessionRecord.csrfToken, remember);
   headers.set("x-csrf-token", sessionRecord.csrfToken);
+  await writeAuthEvent(env, "register_email", user.email, { remember: Boolean(remember) });
   return {
     ok: true,
     status: 201,
@@ -530,6 +533,7 @@ export const logout = async (request, env) => {
   }
 
   await revokeSession(env, context.session);
+  await writeAuthEvent(env, "logout", context.user.email, { session_id: context.session.id });
   return {
     ok: true,
     status: 200,
@@ -602,8 +606,11 @@ export const logoutOtherSessions = async (env, context, requestedEmail = "") => 
         AND (revoked_date IS NULL OR revoked_date = '')
     `
   )
-    .bind(now, email, String(context?.session?.id || ""))
+        .bind(now, email, String(context?.session?.id || ""))
     .run();
 
+  await writeAuthEvent(env, "logout_other_devices", email, { by: context.user.email });
   return { ok: true, status: 200, data: { success: true } };
 };
+
+

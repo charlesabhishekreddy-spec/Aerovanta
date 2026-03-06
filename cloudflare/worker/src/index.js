@@ -11,6 +11,7 @@ import {
   signInWithEmail,
 } from "./auth.js";
 import { handleEntityRequest } from "./entities.js";
+import { inviteUser, listSecurityAuthEvents, listUsers, updateUser } from "./admin.js";
 import { invokeLlm, uploadTransientFile } from "./llm.js";
 
 const mergeHeaders = (headers = {}) => {
@@ -245,6 +246,39 @@ export default {
           501,
           cors.headers
         );
+      }
+
+      if (url.pathname === `${prefix}/users` && request.method === "GET") {
+        const auth = await requireAuth(request, env, cors.headers);
+        if (!auth.ok) return auth.response;
+        const users = await listUsers(env, auth.context, url.searchParams.get("limit") || "200");
+        return json(users, 200, cors.headers);
+      }
+
+      if (url.pathname === `${prefix}/users/invite` && request.method === "POST") {
+        const auth = await requireMutationAuth(request, env, cors.headers);
+        if (!auth.ok) return auth.response;
+        const parsed = await readJsonBody(request);
+        if (!parsed.ok) return errorJson(parsed.code, parsed.message, parsed.status, cors.headers);
+        const invited = await inviteUser(env, auth.context, parsed.body?.email || "");
+        return json(invited, 201, cors.headers);
+      }
+
+      if (url.pathname.startsWith(`${prefix}/users/`) && request.method === "PATCH") {
+        const auth = await requireMutationAuth(request, env, cors.headers);
+        if (!auth.ok) return auth.response;
+        const parsed = await readJsonBody(request);
+        if (!parsed.ok) return errorJson(parsed.code, parsed.message, parsed.status, cors.headers);
+        const userId = decodeURIComponent(url.pathname.slice(`${prefix}/users/`.length));
+        const updated = await updateUser(env, auth.context, userId, parsed.body || {});
+        return json(updated, 200, cors.headers);
+      }
+
+      if (url.pathname === `${prefix}/security/auth-events` && request.method === "GET") {
+        const auth = await requireAuth(request, env, cors.headers);
+        if (!auth.ok) return auth.response;
+        const events = await listSecurityAuthEvents(env, auth.context, url.searchParams.get("limit") || "100");
+        return json(events, 200, cors.headers);
       }
 
       if (url.pathname === `${prefix}/enterprise/sessions` && request.method === "GET") {
