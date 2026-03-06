@@ -4,7 +4,7 @@ compatibility_date = "2026-03-05"
 
 [vars]
 API_PREFIX = "/api/v1"
-CORS_ORIGINS = "http://localhost:5173"
+CORS_ORIGINS = "http://localhost:5173,https://cf885b5d.aerovanta-web.pages.dev"
 FORCE_HTTPS = "true"
 ALLOW_SOCIAL_PROFILE_ONLY = "false"
 EXPOSE_RESET_DEBUG_URL = "false"
