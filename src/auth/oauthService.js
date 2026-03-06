@@ -1,6 +1,10 @@
 const OAUTH_TIMEOUT_MS = 60_000;
 const MICROSOFT_OAUTH_TIMEOUT_MS = 180_000;
 
+const SOCIAL_LOGIN_ENABLED = String(
+  import.meta.env.VITE_ENABLE_SOCIAL_LOGIN || (import.meta.env.DEV ? "true" : "false")
+).trim().toLowerCase() === "true";
+
 const PROVIDERS = {
   google: {
     key: "google",
@@ -261,7 +265,7 @@ export function getSocialProviderConfigs() {
   return Object.values(PROVIDERS).map((provider) => ({
     key: provider.key,
     label: provider.label,
-    enabled: Boolean(provider.clientId),
+    enabled: SOCIAL_LOGIN_ENABLED && Boolean(provider.clientId),
   }));
 }
 
