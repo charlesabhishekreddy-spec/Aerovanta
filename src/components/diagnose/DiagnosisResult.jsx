@@ -3,6 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Leaf, Bug, AlertCircle, X, Droplets, Sprout, Users, ShieldAlert, ShieldCheck, Cpu } from "lucide-react";
 import FeedbackForm from "./FeedbackForm.jsx";
+import { getRenderableMediaUrl } from "@/lib/mediaUrl";
 
 export default function DiagnosisResult({ diagnosis, onStartOver }) {
   const [showFeedback, setShowFeedback] = useState(false);
@@ -16,6 +17,7 @@ export default function DiagnosisResult({ diagnosis, onStartOver }) {
   const infectionLevel = parsePercent(diagnosis.infection_level ?? diagnosis.confidence_score, 0);
   const confidenceScore = parsePercent(diagnosis.confidence_score, 0);
   const isReliable = !diagnosis.requires_manual_review;
+  const imageUrl = getRenderableMediaUrl(diagnosis.image_url);
 
   const getInfectionColor = (level) => {
     if (level <= 30) return "bg-green-500";
@@ -58,9 +60,9 @@ export default function DiagnosisResult({ diagnosis, onStartOver }) {
             </div>
           )}
 
-          {diagnosis.image_url && (
+          {imageUrl && (
             <div className="overflow-hidden rounded-xl border border-violet-100">
-              <img src={diagnosis.image_url} alt={diagnosis.plant_name || "Diagnosed plant"} className="h-64 w-full object-cover" />
+              <img src={imageUrl} alt={diagnosis.plant_name || "Diagnosed plant"} className="h-64 w-full object-cover" />
             </div>
           )}
 
@@ -207,3 +209,4 @@ export default function DiagnosisResult({ diagnosis, onStartOver }) {
     </Card>
   );
 }
+

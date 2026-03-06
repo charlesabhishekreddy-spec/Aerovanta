@@ -2,6 +2,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Bug, X, AlertTriangle, Target, Clock, TrendingUp } from "lucide-react";
+import { getRenderableMediaUrl } from "@/lib/mediaUrl";
 
 export default function PestResult({ result, onStartOver }) {
   const getSeverityColor = (severity) => {
@@ -10,6 +11,8 @@ export default function PestResult({ result, onStartOver }) {
     if (severity === "high") return "bg-orange-100 text-orange-800";
     return "bg-red-100 text-red-800";
   };
+
+  const imageUrl = getRenderableMediaUrl(result.image_url);
 
   const getTypeColor = (type) => {
     const colors = {
@@ -40,10 +43,10 @@ export default function PestResult({ result, onStartOver }) {
 
         <div className="p-6 space-y-6">
           {/* Image */}
-          {result.image_url && (
+          {imageUrl && (
             <div className="rounded-lg overflow-hidden border">
               <img
-                src={result.image_url}
+                src={imageUrl}
                 alt={result.pest_or_disease_name}
                 className="w-full h-64 object-cover"
               />
@@ -155,3 +158,4 @@ export default function PestResult({ result, onStartOver }) {
     </Card>
   );
 }
+
