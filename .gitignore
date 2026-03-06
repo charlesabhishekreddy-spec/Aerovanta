@@ -32,3 +32,4 @@ dist-ssr
 server/data/db.json
 server/uploads/*
 !server/uploads/.gitkeep
+cloudflare/d1/seed.generated.sql

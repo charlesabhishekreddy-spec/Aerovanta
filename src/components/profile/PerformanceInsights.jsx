@@ -36,7 +36,8 @@ import {
 } from "recharts";
 import { toast } from "@/components/ui/use-toast";
 
-const PROGRESS_STORAGE_KEY = "verdent_vision_profile_progress_v1";
+const PROGRESS_STORAGE_KEY = "aerovanta_profile_progress_v1";
+const LEGACY_PROGRESS_STORAGE_KEY = "verdent_vision_profile_progress_v1";
 
 function launchLevelUpConfetti() {
   const duration = 1800;
@@ -186,7 +187,11 @@ export default function PerformanceInsights({
     let snapshot = null;
 
     try {
-      snapshot = JSON.parse(window.localStorage.getItem(PROGRESS_STORAGE_KEY) || "null");
+      snapshot = JSON.parse(
+        window.localStorage.getItem(PROGRESS_STORAGE_KEY)
+          || window.localStorage.getItem(LEGACY_PROGRESS_STORAGE_KEY)
+          || "null"
+      );
     } catch {
       snapshot = null;
     }
@@ -201,6 +206,7 @@ export default function PerformanceInsights({
           PROGRESS_STORAGE_KEY,
           JSON.stringify({ level, unlockedIds: unlockedAchievementIds })
         );
+        window.localStorage.removeItem(LEGACY_PROGRESS_STORAGE_KEY);
       } catch {
         // Ignore storage failures
       }
@@ -261,6 +267,7 @@ export default function PerformanceInsights({
         PROGRESS_STORAGE_KEY,
         JSON.stringify({ level, unlockedIds: unlockedAchievementIds })
       );
+      window.localStorage.removeItem(LEGACY_PROGRESS_STORAGE_KEY);
     } catch {
       // Ignore storage failures
     }

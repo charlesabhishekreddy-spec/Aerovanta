@@ -6,11 +6,15 @@ const toSnakeCase = (str) => {
 	return str.replace(/([A-Z])/g, '_$1').toLowerCase();
 }
 
+const STORAGE_PREFIX = "aerovanta";
+const LEGACY_STORAGE_PREFIX = "verdent";
+
 const getAppParamValue = (paramName, { defaultValue = undefined, removeFromUrl = false } = {}) => {
 	if (isNode) {
 		return defaultValue;
 	}
-	const storageKey = `verdent_${toSnakeCase(paramName)}`;
+	const storageKey = `${STORAGE_PREFIX}_${toSnakeCase(paramName)}`;
+	const legacyStorageKey = `${LEGACY_STORAGE_PREFIX}_${toSnakeCase(paramName)}`;
 	const urlParams = new URLSearchParams(window.location.search);
 	const searchParam = urlParams.get(paramName);
 	if (removeFromUrl) {
@@ -27,8 +31,9 @@ const getAppParamValue = (paramName, { defaultValue = undefined, removeFromUrl =
 		storage.setItem(storageKey, defaultValue);
 		return defaultValue;
 	}
-	const storedValue = storage.getItem(storageKey);
+	const storedValue = storage.getItem(storageKey) || storage.getItem(legacyStorageKey);
 	if (storedValue) {
+		storage.setItem(storageKey, storedValue);
 		return storedValue;
 	}
 	return null;

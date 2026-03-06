@@ -24,7 +24,7 @@ export default function Sidebar() {
 
   return (
     <div className="h-screen w-64 bg-black text-white p-5">
-      <h1 className="text-xl font-bold mb-8">🌱 Verdant Vision</h1>
+      <h1 className="mb-8 text-xl font-bold">Aerovanta</h1>
 
       <nav className="space-y-2">
         {menu.map((item) => {
@@ -35,7 +35,7 @@ export default function Sidebar() {
             <Link
               key={item.name}
               to={item.path}
-              className={`flex items-center gap-3 p-3 rounded-lg transition ${
+              className={`flex items-center gap-3 rounded-lg p-3 transition ${
                 active
                   ? "bg-green-600"
                   : "hover:bg-gray-800"

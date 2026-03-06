@@ -1,4 +1,8 @@
-# Verdent Vision
+# Aerovanta
+
+Branding rollout checklist for repo rename, domains, and OAuth app names:
+
+- [AEROVANTA_BRANDING_CHECKLIST.md](./AEROVANTA_BRANDING_CHECKLIST.md)
 
 Enterprise-style agriculture operations app with a React frontend and a secured Node API backend.
 
@@ -69,7 +73,9 @@ The API now fails startup in production if critical hardening env is unsafe or m
 For a cost-free deployment baseline, use Cloudflare:
 
 1. Frontend: Cloudflare Pages
-2. API: Cloudflare Worker + D1 + R2 (migration path included)
+2. API: Cloudflare Worker + D1
+
+3. Optional later: R2 only if you want persistent uploaded image storage and are willing to enable Cloudflare billing
 
 See detailed checklist: `CLOUD_DEPLOYMENT_CLOUDFLARE.md`
 
@@ -81,3 +87,4 @@ See detailed checklist: `CLOUD_DEPLOYMENT_CLOUDFLARE.md`
 - `npm run api:check-config` - validate production hardening env/config
 - `npm run lint` - run ESLint
 - `npm run build` - build frontend
+

@@ -1,12 +1,16 @@
-const CACHE_KEY = "verdent_browser_location_v1";
+const CACHE_KEY = "aerovanta_browser_location_v1";
+const LEGACY_CACHE_KEY = "verdent_browser_location_v1";
 const CACHE_TTL_MS = 15 * 60 * 1000;
 let inFlightLocationPromise = null;
 
 const readCachedLocation = () => {
   if (typeof window === "undefined" || !window.localStorage) return null;
   try {
-    const raw = window.localStorage.getItem(CACHE_KEY);
+    const raw = window.localStorage.getItem(CACHE_KEY) || window.localStorage.getItem(LEGACY_CACHE_KEY);
     if (!raw) return null;
+    if (!window.localStorage.getItem(CACHE_KEY)) {
+      window.localStorage.setItem(CACHE_KEY, raw);
+    }
     const parsed = JSON.parse(raw);
     const latitude = Number(parsed?.latitude);
     const longitude = Number(parsed?.longitude);
@@ -89,6 +93,7 @@ export const clearBrowserLocationCache = () => {
   if (typeof window === "undefined" || !window.localStorage) return;
   try {
     window.localStorage.removeItem(CACHE_KEY);
+    window.localStorage.removeItem(LEGACY_CACHE_KEY);
   } catch {
     // Ignore storage failures.
   }

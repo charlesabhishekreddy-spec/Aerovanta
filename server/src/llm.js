@@ -1138,7 +1138,7 @@ const callOpenAi = async ({ prompt, schema, fileUrls, options, type }) => {
       {
         role: "system",
         content:
-          "You are VerdentVision Enterprise Engine. Use visible evidence only, abstain when uncertain, and never fabricate certainty.",
+          "You are Aerovanta Enterprise Engine. Use visible evidence only, abstain when uncertain, and never fabricate certainty.",
       },
       { role: "user", content: userContent },
     ],

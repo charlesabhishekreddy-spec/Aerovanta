@@ -15,9 +15,12 @@ const getStorage = () => {
 };
 
 const storage = getStorage();
-const APP_KEY_PREFIX = `verdent_vision_${appParams.appId || 'local'}`;
+const APP_KEY_PREFIX = `aerovanta_${appParams.appId || 'local'}`;
+const LEGACY_APP_KEY_PREFIX = `verdent_vision_${appParams.appId || 'local'}`;
 const getKey = (entityName) => `${APP_KEY_PREFIX}_${entityName}`;
+const getLegacyKey = (entityName) => `${LEGACY_APP_KEY_PREFIX}_${entityName}`;
 const USER_KEY = `${APP_KEY_PREFIX}_current_user`;
+const LEGACY_USER_KEY = `${LEGACY_APP_KEY_PREFIX}_current_user`;
 
 const nowIso = () => new Date().toISOString();
 const createId = () => {
@@ -28,8 +31,13 @@ const createId = () => {
 };
 
 const readCollection = (entityName) => {
-  const raw = storage.getItem(getKey(entityName));
+  const key = getKey(entityName);
+  const raw = storage.getItem(key) ?? storage.getItem(getLegacyKey(entityName));
   if (!raw) return [];
+
+  if (!storage.getItem(key)) {
+    storage.setItem(key, raw);
+  }
 
   try {
     return JSON.parse(raw);
@@ -81,8 +89,11 @@ const matchesFilterValue = (recordValue, expectedValue) => {
 };
 
 const getCurrentUser = () => {
-  const saved = storage.getItem(USER_KEY);
+  const saved = storage.getItem(USER_KEY) ?? storage.getItem(LEGACY_USER_KEY);
   if (saved) {
+    if (!storage.getItem(USER_KEY)) {
+      storage.setItem(USER_KEY, saved);
+    }
     return JSON.parse(saved);
   }
 

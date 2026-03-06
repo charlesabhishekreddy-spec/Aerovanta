@@ -1,19 +1,26 @@
-name = "verdent-vision-api"
+name = "aerovanta-api"
 main = "src/index.js"
 compatibility_date = "2026-03-05"
 
 [vars]
 API_PREFIX = "/api/v1"
-CORS_ORIGINS = "https://your-frontend-domain.com"
+CORS_ORIGINS = "http://localhost:5173"
 FORCE_HTTPS = "true"
 ALLOW_SOCIAL_PROFILE_ONLY = "false"
 EXPOSE_RESET_DEBUG_URL = "false"
+ADMIN_EMAIL = "admin@aerovanta.com"
+SESSION_COOKIE_NAME = "vv_session"
+CSRF_COOKIE_NAME = "vv_csrf"
+PASSWORD_ITERATIONS = "210000"
+PASSWORD_MIN_LENGTH = "12"
+DEFAULT_SESSION_HOURS = "8"
+REMEMBER_SESSION_DAYS = "30"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "verdent-vision"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_name = "aerovanta"
+database_id = "b431d1c0-f59e-4e0c-91e8-2f2166ad5aa0"
 
-[[r2_buckets]]
-binding = "UPLOADS_BUCKET"
-bucket_name = "verdent-vision-uploads"
+
+
+

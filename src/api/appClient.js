@@ -1,6 +1,7 @@
 const API_BASE = String(import.meta.env.VITE_API_BASE_URL || "/api/v1").replace(/\/+$/, "");
 const CSRF_COOKIE_NAME = String(import.meta.env.VITE_CSRF_COOKIE_NAME || "vv_csrf");
-const DEVICE_KEY = "verdent_device_id";
+const DEVICE_KEY = "aerovanta_device_id";
+const LEGACY_DEVICE_KEY = "verdent_device_id";
 const REQUEST_TIMEOUT_MS = (() => {
   const parsed = Number.parseInt(String(import.meta.env.VITE_API_TIMEOUT_MS || ""), 10);
   if (!Number.isFinite(parsed)) return 20_000;
@@ -20,11 +21,11 @@ const getStorage = () => {
 const storage = getStorage();
 
 const getDeviceId = () => {
-  let id = storage.getItem(DEVICE_KEY);
+  let id = storage.getItem(DEVICE_KEY) || storage.getItem(LEGACY_DEVICE_KEY);
   if (!id) {
     id = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    storage.setItem(DEVICE_KEY, id);
   }
+  storage.setItem(DEVICE_KEY, id);
   return id;
 };
 

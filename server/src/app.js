@@ -997,7 +997,7 @@ export async function createApp(config) {
       if (routePath === "/" && method === "GET") {
         success(res, 200, {
           status: "ok",
-          service: "verdent-vision-api",
+          service: "aerovanta-api",
           timestamp: nowIso(),
         });
         return;
@@ -1616,7 +1616,7 @@ export async function createApp(config) {
           throw createHttpError(400, "Prompt or image is required.", "invalid_prompt");
         }
 
-        const composedPrompt = `You are Verdent Vision AI Farming Assistant.
+        const composedPrompt = `You are Aerovanta AI Farming Assistant.
 Provide practical, crop-safe advice for farmers and growers.
 Rules:
 - Be accurate, concise, and actionable.

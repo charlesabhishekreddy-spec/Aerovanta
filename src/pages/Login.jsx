@@ -126,7 +126,7 @@ export default function Login() {
             Your farm awaits.
           </h1>
           <p className="text-lg text-violet-100">
-            Securely access Verdant Vision to manage diagnostics, schedules, and operations in one place.
+            Securely access Aerovanta to manage diagnostics, schedules, and operations in one place.
           </p>
         </div>
       </div>
@@ -134,7 +134,7 @@ export default function Login() {
       <div className="flex items-center justify-center p-8">
         <div className="w-full max-w-md rounded-3xl border border-white/75 bg-white/75 p-10 shadow-[0_20px_45px_rgba(109,40,217,0.18)] backdrop-blur-xl space-y-6">
           <div className="space-y-1">
-            <h2 className="text-3xl font-semibold tracking-tight text-slate-900">Welcome to Verdant Vision</h2>
+            <h2 className="text-3xl font-semibold tracking-tight text-slate-900">Welcome to Aerovanta</h2>
             <p className="text-slate-500 text-sm">Sign in to continue</p>
           </div>
 
@@ -242,7 +242,7 @@ export default function Login() {
           </form>
 
           <p className="text-sm text-slate-500 text-center">
-            New to Verdant Vision?{" "}
+            New to Aerovanta?{" "}
             <Link className="font-semibold text-violet-600 hover:text-violet-700" to="/signup">
               Create an account
             </Link>

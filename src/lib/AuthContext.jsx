@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { appClient } from "@/api/appClient";
 
 const AuthContext = createContext();
-const appPublicSettings = { id: "verdent-local", public_settings: { auth_required: true } };
+const appPublicSettings = { id: "aerovanta-local", public_settings: { auth_required: true } };
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);

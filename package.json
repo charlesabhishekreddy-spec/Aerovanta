@@ -1,5 +1,5 @@
 {
-  "name": "verdent-vision-app",
+  "name": "aerovanta-app",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -9,6 +9,7 @@
     "api:dev": "node --watch server/index.js",
     "api:check-config": "node server/scripts/check-config.js",
     "build": "vite build",
+    "cloudflare:d1:export-seed": "node cloudflare/scripts/export-d1-seed.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc -p ./jsconfig.json",

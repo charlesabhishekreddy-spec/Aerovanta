@@ -1,21 +1,23 @@
+import { getDatabaseHealth } from "./db.js";
+import { getAuthContext, logout, registerWithEmail, sanitizeUser, signInWithEmail } from "./auth.js";
+
+const mergeHeaders = (headers = {}) => {
+  const merged = new Headers(headers);
+  merged.set("content-type", "application/json; charset=utf-8");
+  merged.set("cache-control", "no-store");
+  return merged;
+};
+
 const json = (data, status = 200, headers = {}) =>
   new Response(JSON.stringify({ data }), {
     status,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
-      ...headers,
-    },
+    headers: mergeHeaders(headers),
   });
 
 const errorJson = (code, message, status = 400, headers = {}) =>
   new Response(JSON.stringify({ error: { code, message } }), {
     status,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
-      ...headers,
-    },
+    headers: mergeHeaders(headers),
   });
 
 const normalizeOrigin = (value = "") => String(value || "").trim().replace(/\/+$/, "");
@@ -63,6 +65,22 @@ const applyCors = (request, env, headers) => {
   return { allowed: true, headers };
 };
 
+const readJsonBody = async (request) => {
+  const contentType = String(request.headers.get("content-type") || "").toLowerCase();
+  if (!contentType.includes("application/json")) {
+    return { ok: false, code: "unsupported_media_type", message: "Content-Type must be application/json.", status: 415 };
+  }
+  try {
+    const body = await request.json();
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return { ok: false, code: "invalid_body", message: "JSON request body must be an object.", status: 400 };
+    }
+    return { ok: true, body };
+  } catch {
+    return { ok: false, code: "invalid_json", message: "Invalid JSON payload.", status: 400 };
+  }
+};
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -99,15 +117,23 @@ export default {
     }
 
     if (url.pathname === "/readyz" || url.pathname === `${prefix}/readyz`) {
+      const databaseHealth = await getDatabaseHealth(env);
       const checks = {
-        d1: env.DB ? "configured" : "missing",
-        r2: env.UPLOADS_BUCKET ? "configured" : "missing",
+        d1: !databaseHealth.configured
+          ? "missing"
+          : databaseHealth.schemaReady
+            ? "ready"
+            : "schema_missing",
+        uploads: "transient_not_persisted",
       };
-      const ready = checks.d1 === "configured" && checks.r2 === "configured";
+      const ready = checks.d1 === "ready";
       return json(
         {
           status: ready ? "ready" : "degraded",
           checks,
+          details: {
+            d1: databaseHealth,
+          },
           timestamp: new Date().toISOString(),
         },
         ready ? 200 : 503,
@@ -118,11 +144,68 @@ export default {
     if (url.pathname === "/" || url.pathname === prefix) {
       return json(
         {
-          service: "verdent-vision-api-edge",
+          service: "aerovanta-api-edge",
           status: "ok",
           timestamp: new Date().toISOString(),
         },
         200,
+        cors.headers
+      );
+    }
+
+    if ((url.pathname === `${prefix}/auth/me`) && request.method === "GET") {
+      const context = await getAuthContext(request, env);
+      if (!context) {
+        return errorJson("auth_required", "Authentication required.", 401, cors.headers);
+      }
+      return json(sanitizeUser(context.user), 200, cors.headers);
+    }
+
+    if (url.pathname === `${prefix}/auth/login/email` && request.method === "POST") {
+      const parsed = await readJsonBody(request);
+      if (!parsed.ok) {
+        return errorJson(parsed.code, parsed.message, parsed.status, cors.headers);
+      }
+      const result = await signInWithEmail(request, env, parsed.body);
+      if (!result.ok) {
+        return errorJson(result.code, result.message, result.status, cors.headers);
+      }
+      const responseHeaders = new Headers(cors.headers);
+      result.headers?.forEach((value, key) => responseHeaders.append(key, value));
+      return json(result.user, result.status, responseHeaders);
+    }
+
+    if (url.pathname === `${prefix}/auth/register/email` && request.method === "POST") {
+      const parsed = await readJsonBody(request);
+      if (!parsed.ok) {
+        return errorJson(parsed.code, parsed.message, parsed.status, cors.headers);
+      }
+      const result = await registerWithEmail(request, env, parsed.body);
+      if (!result.ok) {
+        return errorJson(result.code, result.message, result.status, cors.headers);
+      }
+      const responseHeaders = new Headers(cors.headers);
+      result.headers?.forEach((value, key) => responseHeaders.append(key, value));
+      return json(result.user, result.status, responseHeaders);
+    }
+
+    if (url.pathname === `${prefix}/auth/logout` && request.method === "POST") {
+      const result = await logout(request, env);
+      if (!result.ok) {
+        const responseHeaders = new Headers(cors.headers);
+        result.headers?.forEach((value, key) => responseHeaders.append(key, value));
+        return errorJson(result.code, result.message, result.status, responseHeaders);
+      }
+      const responseHeaders = new Headers(cors.headers);
+      result.headers?.forEach((value, key) => responseHeaders.append(key, value));
+      return json(result.data, result.status, responseHeaders);
+    }
+
+    if (url.pathname === `${prefix}/auth/social` && request.method === "POST") {
+      return errorJson(
+        "not_implemented",
+        "Social login is not migrated to the Cloudflare worker yet. Use email login/register first.",
+        501,
         cors.headers
       );
     }
@@ -135,3 +218,4 @@ export default {
     );
   },
 };
+

@@ -179,7 +179,7 @@ export default function Signup() {
         <div className="w-full max-w-md rounded-3xl border border-white/75 bg-white/75 p-10 shadow-[0_20px_45px_rgba(109,40,217,0.18)] backdrop-blur-xl space-y-6">
           <div className="space-y-1">
             <h2 className="text-3xl font-semibold tracking-tight text-slate-900">Create Account</h2>
-            <p className="text-slate-500 text-sm">Set up secure access to Verdant Vision</p>
+            <p className="text-slate-500 text-sm">Set up secure access to Aerovanta</p>
           </div>
 
           {socialProviders.length > 0 ? (
