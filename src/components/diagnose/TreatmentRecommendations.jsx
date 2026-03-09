@@ -323,57 +323,7 @@ export default function TreatmentRecommendations({ diagnosis }) {
       if (hasCompleteScopedSet && !forceRefresh) {
         setTreatments(normalizedScopedTreatments);
       } else {
-        const result = await appClient.integrations.Core.InvokeLLM({
-          prompt: `You are an expert plant pathologist creating crop-specific, disease-specific treatment recommendations.
-
-Plant: ${diagnosis.plant_name}
-Disease: ${diagnosis.disease_name}
-Infection Level: ${diagnosis.infection_level || diagnosis.confidence_score}%
-Severity: ${diagnosis.severity || "not provided"}
-Symptoms: ${(diagnosis.symptoms || []).join(", ") || "not provided"}
-Diagnosis Notes: ${diagnosis.diagnosis_notes || "not provided"}
-Confidence Mode: ${isProvisional ? "provisional_low_confidence" : "verified_high_confidence"}
-
-Rules:
-- Recommendations must be specific to this exact plant and disease pair.
-- Do not include treatments that are irrelevant to this disease or host crop.
-- Include clear application frequency and timing windows.
-- Prefer integrated management and resistance-rotation safe practices.
-- If confidence mode is provisional, include lower-risk first-line options before aggressive systemic options.
-
-Provide exactly 4 treatment options: 2 chemical and 2 organic/biological.
-For each treatment provide:
-1. Treatment name
-2. Type (chemical or organic)
-3. Application method and proportions
-4. Frequency
-5. Description (why this is specific to this diagnosis)
-6. Safety precautions (array)
-7. Effectiveness rating (1-5)`,
-          ...(diagnosis?.image_url ? { file_urls: [diagnosis.image_url] } : {}),
-          response_json_schema: {
-            type: "object",
-            properties: {
-              treatments: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    name: { type: "string" },
-                    type: { type: "string", enum: ["chemical", "organic"] },
-                    proportions: { type: "string" },
-                    frequency: { type: "string" },
-                    description: { type: "string" },
-                    safety_precautions: { type: "array", items: { type: "string" } },
-                    effectiveness_rating: { type: "number" },
-                  },
-                },
-              },
-            },
-          },
-        });
-
-        const nextTreatments = normalizeTreatmentSet(result?.treatments, diagnosis);
+        const nextTreatments = fallbackTreatments;
         const newlySavedTreatments = [];
 
         for (let index = 0; index < nextTreatments.length; index += 1) {
@@ -404,7 +354,7 @@ For each treatment provide:
           }
         }
 
-        if (forceRefresh && scopedTreatments.length > nextTreatments.length) {
+        if (scopedTreatments.length > nextTreatments.length) {
           for (const stale of scopedTreatments.slice(nextTreatments.length)) {
             if (stale?.id) await appClient.entities.Treatment.delete(stale.id);
           }
@@ -499,7 +449,7 @@ For each treatment provide:
           <h2 className="text-xl font-bold text-gray-900">Treatment Suggestions</h2>
           <Button variant="ghost" size="sm" onClick={() => fetchTreatments({ forceRefresh: true })} className="gap-2">
             <RefreshCw className="h-4 w-4" />
-            Refetch Treatments
+            Refresh Treatments
           </Button>
         </div>
 
