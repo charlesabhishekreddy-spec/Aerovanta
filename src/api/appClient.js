@@ -1,4 +1,21 @@
-const API_BASE = String(import.meta.env.VITE_API_BASE_URL || "/api/v1").replace(/\/+$/, "");
+const normalizeBaseUrl = (value) => String(value || "").trim().replace(/\/+$/, "");
+
+const resolveApiBase = () => {
+  const configured = normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL);
+  if (configured) return configured;
+  if (typeof window === "undefined") return "/api/v1";
+
+  const hostname = String(window.location.hostname || "").toLowerCase();
+  if (hostname === "aerovanta-web.pages.dev" || hostname.endsWith(".aerovanta-web.pages.dev")) {
+    return "https://aerovanta-api.aerovata-charles.workers.dev/api/v1";
+  }
+  if (hostname === "aerovanta.com" || hostname === "www.aerovanta.com" || hostname.endsWith(".aerovanta.com")) {
+    return "https://api.aerovanta.com/api/v1";
+  }
+  return "/api/v1";
+};
+
+const API_BASE = resolveApiBase();
 const CSRF_COOKIE_NAME = String(import.meta.env.VITE_CSRF_COOKIE_NAME || "vv_csrf");
 const CSRF_TOKEN_KEY = "aerovanta_csrf_token";
 const LEGACY_CSRF_TOKEN_KEY = "verdent_csrf_token";
