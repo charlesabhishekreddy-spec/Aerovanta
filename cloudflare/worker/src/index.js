@@ -1,14 +1,18 @@
-import { getDatabaseHealth } from "./db.js";
+﻿import { getDatabaseHealth } from "./db.js";
 import {
+  changePassword,
+  completePasswordReset,
   getAuthContext,
   getRequestCsrfToken,
   listSessions,
   logout,
   logoutOtherSessions,
   registerWithEmail,
+  requestPasswordReset,
   requireCsrf,
   sanitizeUser,
   signInWithEmail,
+  validatePasswordResetToken,
 } from "./auth.js";
 import { handleEntityRequest } from "./entities.js";
 import { inviteUser, listSecurityAuthEvents, listUsers, updateUser } from "./admin.js";
@@ -230,6 +234,39 @@ export default {
         return json(result.user, result.status, responseHeaders);
       }
 
+      if (url.pathname === `${prefix}/auth/password-reset/request` && request.method === "POST") {
+        const parsed = await readJsonBody(request);
+        if (!parsed.ok) return errorJson(parsed.code, parsed.message, parsed.status, cors.headers);
+        const result = await requestPasswordReset(env, parsed.body);
+        if (!result.ok) return errorJson(result.code, result.message, result.status, cors.headers);
+        return json(result.data, result.status, cors.headers);
+      }
+
+      if (url.pathname === `${prefix}/auth/password-reset/validate` && request.method === "GET") {
+        const result = await validatePasswordResetToken(env, url.searchParams.get("token") || "");
+        if (!result.ok) return errorJson(result.code, result.message, result.status, cors.headers);
+        return json(result.data, result.status, cors.headers);
+      }
+
+      if (url.pathname === `${prefix}/auth/password-reset/complete` && request.method === "POST") {
+        const parsed = await readJsonBody(request);
+        if (!parsed.ok) return errorJson(parsed.code, parsed.message, parsed.status, cors.headers);
+        const result = await completePasswordReset(env, parsed.body);
+        const responseHeaders = new Headers(cors.headers);
+        result.headers?.forEach((value, key) => responseHeaders.append(key, value));
+        if (!result.ok) return errorJson(result.code, result.message, result.status, responseHeaders);
+        return json(result.data, result.status, responseHeaders);
+      }
+
+      if (url.pathname === `${prefix}/auth/change-password` && request.method === "POST") {
+        const auth = await requireMutationAuth(request, env, cors.headers);
+        if (!auth.ok) return auth.response;
+        const parsed = await readJsonBody(request);
+        if (!parsed.ok) return errorJson(parsed.code, parsed.message, parsed.status, cors.headers);
+        const result = await changePassword(env, auth.context, parsed.body);
+        if (!result.ok) return errorJson(result.code, result.message, result.status, cors.headers);
+        return json(result.data, result.status, cors.headers);
+      }
       if (url.pathname === `${prefix}/auth/logout` && request.method === "POST") {
         const result = await logout(request, env);
         const responseHeaders = new Headers(cors.headers);

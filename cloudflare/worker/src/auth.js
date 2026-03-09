@@ -1,4 +1,4 @@
-import { writeAuthEvent } from "./audit.js";
+﻿import { writeAuthEvent } from "./audit.js";
 const textEncoder = new TextEncoder();
 const MAX_PBKDF2_ITERATIONS = 100000;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -135,6 +135,15 @@ const getPasswordMinLength = (env) => Number.parseInt(String(env.PASSWORD_MIN_LE
 const getRememberDays = (env) => Number.parseInt(String(env.REMEMBER_SESSION_DAYS || "30"), 10) || 30;
 const getSessionHours = (env) => Number.parseInt(String(env.DEFAULT_SESSION_HOURS || "8"), 10) || 8;
 const getAdminEmail = (env) => normalizeEmail(env.ADMIN_EMAIL || "");
+const getResetTokenMinutes = (env) => Number.parseInt(String(env.RESET_TOKEN_MINUTES || "15"), 10) || 15;
+const shouldExposeResetDebugUrl = (env) => String(env.EXPOSE_RESET_DEBUG_URL || "false").toLowerCase() === "true";
+const maskEmail = (email = "") => {
+  const normalized = normalizeEmail(email);
+  const [local, domain] = normalized.split("@");
+  if (!local || !domain) return "your email";
+  const maskedLocal = `${local[0]}${"*".repeat(Math.max(local.length - 2, 1))}${local.slice(-1)}`;
+  return `${maskedLocal}@${domain}`;
+};
 
 const sessionMaxAgeSeconds = (env, remember) =>
   remember ? getRememberDays(env) * 24 * 60 * 60 : getSessionHours(env) * 60 * 60;
@@ -506,6 +515,225 @@ export const registerWithEmail = async (request, env, payload = {}) => {
   };
 };
 
+const getUserById = async (env, userId) => {
+  const row = await env.DB.prepare("SELECT payload_json FROM users WHERE id = ?1 LIMIT 1")
+    .bind(String(userId || ""))
+    .first();
+  return row?.payload_json ? safeParseJson(row.payload_json, null) : null;
+};
+
+const getPasswordResetRecordByHash = async (env, tokenHash) => {
+  const row = await env.DB.prepare("SELECT payload_json FROM password_reset_tokens WHERE token_hash = ?1 LIMIT 1")
+    .bind(String(tokenHash || ""))
+    .first();
+  return row?.payload_json ? safeParseJson(row.payload_json, null) : null;
+};
+
+const writePasswordResetToken = async (env, record) => {
+  await env.DB.prepare(
+    `
+      INSERT INTO password_reset_tokens (
+        id, user_id, token_hash, created_date, expires_at, used_at, updated_date, payload_json
+      ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+    `
+  )
+    .bind(
+      record.id,
+      record.user_id,
+      record.token_hash,
+      record.created_date,
+      record.expires_at,
+      record.used_at || "",
+      record.updated_date || "",
+      JSON.stringify(record)
+    )
+    .run();
+  return record;
+};
+
+const updatePasswordResetToken = async (env, record) => {
+  await env.DB.prepare(
+    "UPDATE password_reset_tokens SET used_at = ?2, updated_date = ?3, payload_json = ?4 WHERE id = ?1"
+  )
+    .bind(record.id, record.used_at || "", record.updated_date || "", JSON.stringify(record))
+    .run();
+  return record;
+};
+
+const revokeUserSessions = async (env, userId, exceptSessionId = "") => {
+  const statement = exceptSessionId
+    ? env.DB.prepare(
+        `
+          SELECT payload_json FROM auth_sessions
+          WHERE user_id = ?1
+            AND id != ?2
+            AND (revoked_date IS NULL OR revoked_date = '')
+        `
+      ).bind(String(userId || ""), String(exceptSessionId || ""))
+    : env.DB.prepare(
+        `
+          SELECT payload_json FROM auth_sessions
+          WHERE user_id = ?1
+            AND (revoked_date IS NULL OR revoked_date = '')
+        `
+      ).bind(String(userId || ""));
+
+  const result = await statement.all();
+  const rows = Array.isArray(result?.results) ? result.results : [];
+  for (const row of rows) {
+    const session = safeParseJson(row?.payload_json, null);
+    if (session?.id) {
+      await revokeSession(env, session);
+    }
+  }
+};
+
+export const changePassword = async (env, context, payload = {}) => {
+  const currentPassword = String(payload.currentPassword || "");
+  const newPassword = String(payload.newPassword || "");
+  if (!currentPassword || !newPassword) {
+    return { ok: false, status: 400, code: "invalid_password", message: "Current and new passwords are required." };
+  }
+
+  const user = await getUserById(env, context?.user?.id || "");
+  if (!user?.password_hash) {
+    return { ok: false, status: 400, code: "password_not_configured", message: "Password login is not configured for this account." };
+  }
+
+  const currentHash = await derivePasswordHash(currentPassword, user.password_salt, user.password_iterations || getPasswordIterations(env));
+  if (!constantTimeEqualHex(currentHash, user.password_hash || "")) {
+    return { ok: false, status: 400, code: "invalid_password", message: "Current password is incorrect." };
+  }
+
+  const passwordError = validatePassword(newPassword, user.email, getPasswordMinLength(env));
+  if (passwordError) {
+    return { ok: false, status: 400, code: "invalid_password", message: passwordError };
+  }
+  if (currentPassword === newPassword) {
+    return { ok: false, status: 400, code: "invalid_password", message: "New password must be different from the current password." };
+  }
+
+  const changedAt = nowIso();
+  const passwordRecord = await makePasswordRecord(newPassword, getPasswordIterations(env));
+  await writeUser(env, {
+    ...user,
+    ...passwordRecord,
+    password_changed_at: changedAt,
+    updated_date: changedAt,
+  });
+  await revokeUserSessions(env, user.id, context?.session?.id || "");
+  await writeAuthEvent(env, "password_changed", user.email);
+  return { ok: true, status: 200, data: { success: true } };
+};
+
+export const requestPasswordReset = async (env, payload = {}) => {
+  const email = normalizeEmail(payload.email || "");
+  const genericMessage = "If an account exists, password reset instructions have been sent.";
+
+  if (!isValidEmail(email)) {
+    return { ok: true, status: 200, data: { success: true, message: genericMessage } };
+  }
+
+  const user = await getUserByEmail(env, email);
+  if (!user?.password_hash || String(user.account_status || "").toLowerCase() !== "active") {
+    await writeAuthEvent(env, "password_reset_requested", email, { status: "ignored" });
+    return { ok: true, status: 200, data: { success: true, message: genericMessage } };
+  }
+
+  const rawToken = randomHex(24);
+  const tokenHash = await hashText(rawToken);
+  const createdDate = nowIso();
+  const expiresAt = new Date(Date.now() + getResetTokenMinutes(env) * 60 * 1000).toISOString();
+  const resetRecord = {
+    id: crypto.randomUUID(),
+    user_id: user.id,
+    token_hash: tokenHash,
+    created_date: createdDate,
+    expires_at: expiresAt,
+    used_at: null,
+    updated_date: createdDate,
+  };
+
+  await env.DB.prepare("DELETE FROM password_reset_tokens WHERE user_id = ?1 AND (used_at IS NULL OR used_at = '')")
+    .bind(user.id)
+    .run();
+  await writePasswordResetToken(env, resetRecord);
+  await writeAuthEvent(env, "password_reset_requested", email, { status: "issued" });
+
+  const data = {
+    success: true,
+    message: genericMessage,
+  };
+  if (shouldExposeResetDebugUrl(env)) {
+    data.debug_reset_url = `/reset-password?token=${encodeURIComponent(rawToken)}`;
+  }
+  return { ok: true, status: 200, data };
+};
+
+export const validatePasswordResetToken = async (env, token = "") => {
+  const rawToken = String(token || "");
+  if (!rawToken) {
+    return { ok: true, status: 200, data: { valid: false } };
+  }
+
+  const tokenHash = await hashText(rawToken);
+  const resetRecord = await getPasswordResetRecordByHash(env, tokenHash);
+  if (!resetRecord || resetRecord.used_at || new Date(resetRecord.expires_at).getTime() <= Date.now()) {
+    return { ok: true, status: 200, data: { valid: false } };
+  }
+
+  const user = await getUserById(env, resetRecord.user_id);
+  if (!user) {
+    return { ok: true, status: 200, data: { valid: false } };
+  }
+
+  return { ok: true, status: 200, data: { valid: true, email_hint: maskEmail(user.email) } };
+};
+
+export const completePasswordReset = async (env, payload = {}) => {
+  const token = String(payload.token || "");
+  const newPassword = String(payload.newPassword || "");
+  if (!token || !newPassword) {
+    return { ok: false, status: 400, code: "invalid_request", message: "Reset token and new password are required." };
+  }
+
+  const passwordError = validatePassword(newPassword, "", getPasswordMinLength(env));
+  if (passwordError) {
+    return { ok: false, status: 400, code: "invalid_password", message: passwordError };
+  }
+
+  const tokenHash = await hashText(token);
+  const resetRecord = await getPasswordResetRecordByHash(env, tokenHash);
+  if (!resetRecord || resetRecord.used_at || new Date(resetRecord.expires_at).getTime() <= Date.now()) {
+    return { ok: false, status: 400, code: "invalid_reset_token", message: "Reset link is invalid or expired." };
+  }
+
+  const user = await getUserById(env, resetRecord.user_id);
+  if (!user || String(user.account_status || "").toLowerCase() === "suspended") {
+    return { ok: false, status: 400, code: "invalid_reset_token", message: "Reset link is invalid or expired." };
+  }
+
+  const completedAt = nowIso();
+  const passwordRecord = await makePasswordRecord(newPassword, getPasswordIterations(env));
+  await writeUser(env, {
+    ...user,
+    ...passwordRecord,
+    password_reset_at: completedAt,
+    updated_date: completedAt,
+  });
+  await updatePasswordResetToken(env, {
+    ...resetRecord,
+    used_at: completedAt,
+    updated_date: completedAt,
+  });
+  await revokeUserSessions(env, user.id);
+  await writeAuthEvent(env, "password_reset_completed", user.email);
+
+  const headers = new Headers();
+  appendClearAuthCookies(headers, env);
+  headers.set("x-csrf-token", "");
+  return { ok: true, status: 200, data: { success: true }, headers };
+};
 export const logout = async (request, env) => {
   const context = await getAuthContext(request, env, { touch: false });
   const headers = new Headers();
