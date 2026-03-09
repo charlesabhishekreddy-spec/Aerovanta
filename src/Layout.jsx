@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { createPageUrl } from "@/utils";
-import { Shield, Sprout, User } from "lucide-react";
+import { LogOut, Shield, Sprout, User } from "lucide-react";
 import { useAuth } from "@/lib/AuthContext";
 
 const HOME_PATH = "/";
@@ -9,7 +9,7 @@ const HOME_ALIAS = createPageUrl("Home");
 
 export default function Layout({ children, currentPageName: _currentPageName }) {
   const location = useLocation();
-  const { user: currentUser } = useAuth();
+  const { user: currentUser, logout } = useAuth();
 
   const navItems = useMemo(
     () => [
@@ -27,6 +27,10 @@ export default function Layout({ children, currentPageName: _currentPageName }) 
 
   const pathname = location.pathname.toLowerCase();
   const isHome = pathname === HOME_PATH || pathname === HOME_ALIAS;
+
+  const handleLogout = async () => {
+    await logout(true);
+  };
 
   const isItemActive = (item) => {
     if (item.name === "Home") return isHome;
@@ -80,18 +84,27 @@ export default function Layout({ children, currentPageName: _currentPageName }) 
                 </Link>
               ) : null}
             </div>
-          </nav>
+          </nav>          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="inline-flex h-11 items-center gap-2 rounded-full border border-rose-200 bg-white/80 px-4 text-sm font-medium text-rose-600 transition-all hover:bg-rose-50"
+            >
+              <LogOut className="h-4 w-4" />
+              <span className="hidden sm:inline">Log out</span>
+            </button>
 
-          <Link
-            to={createPageUrl("Profile")}
-            className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border transition-all ${
-              pathname === createPageUrl("Profile")
-                ? "border-violet-200 bg-violet-100 text-violet-700"
-                : "border-white/70 bg-white/65 text-violet-600 hover:bg-violet-100/70"
-            }`}
-          >
-            <User className="h-5 w-5" />
-          </Link>
+            <Link
+              to={createPageUrl("Profile")}
+              className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border transition-all ${
+                pathname === createPageUrl("Profile")
+                  ? "border-violet-200 bg-violet-100 text-violet-700"
+                  : "border-white/70 bg-white/65 text-violet-600 hover:bg-violet-100/70"
+              }`}
+            >
+              <User className="h-5 w-5" />
+            </Link>
+          </div>
         </div>
       </header>
 
