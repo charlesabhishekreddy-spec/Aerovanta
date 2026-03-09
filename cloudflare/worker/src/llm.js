@@ -531,17 +531,271 @@ const buildPredictionsFallback = (schema) =>
     ],
   });
 
-const buildTreatmentsFallback = (schema) =>
-  shape(schema, {
-    treatments: [
+const promptField = (prompt, label) => {
+  const match = String(prompt || "").match(new RegExp(`${label}\\s*:\\s*([^\\n]+)`, "i"));
+  return String(match?.[1] || "").trim();
+};
+
+const inferDiseaseBucket = (diseaseName = "") => {
+  const disease = normalizeKey(diseaseName);
+  if (!disease || disease.includes("healthy") || disease.includes("no disease")) return "healthy";
+  if (
+    disease.includes("rust") ||
+    disease.includes("blight") ||
+    disease.includes("mildew") ||
+    disease.includes("mold") ||
+    disease.includes("spot") ||
+    disease.includes("scab") ||
+    disease.includes("anthracnose") ||
+    disease.includes("rot")
+  ) return "fungal";
+  if (disease.includes("canker") || disease.includes("bacterial")) return "bacterial";
+  if (disease.includes("virus") || disease.includes("mosaic") || disease.includes("viroid")) return "viral";
+  if (disease.includes("deficiency") || disease.includes("stress") || disease.includes("sunscald") || disease.includes("nutrient")) {
+    return "physiological";
+  }
+  return "general";
+};
+
+const buildTreatmentFallbackSet = (prompt = "") => {
+  const plant = promptField(prompt, "Plant") || "crop";
+  const disease = promptField(prompt, "Disease") || "observed disease";
+  const severity = normalizeKey(promptField(prompt, "Severity"));
+  const provisional = /Confidence Mode:\s*provisional/i.test(String(prompt || ""));
+  const bucket = inferDiseaseBucket(disease);
+  const baseSafety = provisional
+    ? ["Confirm with a clearer image before aggressive chemical use.", "Follow local label and pre-harvest interval requirements."]
+    : ["Wear gloves, eye protection, and follow crop label restrictions.", "Rotate modes of action to reduce resistance pressure."];
+
+  if (bucket === "fungal") {
+    return [
       {
-        name: "Targeted scouting and sanitation",
-        type: "cultural",
-        instructions: "Remove heavily affected tissue where feasible and intensify scouting in nearby plants.",
-        safety: "Apply standard PPE and local label guidance for any follow-up treatments.",
+        name: `${plant} protectant copper spray`,
+        type: "chemical",
+        proportions: "Use labeled copper fungicide rate for this crop; ensure full leaf coverage.",
+        frequency: severity === "high" ? "Repeat every 5-7 days during active pressure." : "Repeat every 7-10 days during wet periods.",
+        description: `Useful as a protectant option for ${disease} on ${plant}, especially before new lesion spread after rain or dew events.`,
+        safety_precautions: baseSafety,
+        effectiveness_rating: 3,
       },
-    ],
+      {
+        name: `${plant} systemic fungicide rotation`,
+        type: "chemical",
+        proportions: "Use a crop-labeled systemic fungicide with resistance-group rotation; avoid repeating the same group back-to-back.",
+        frequency: "Apply at the earliest disease window and rotate every 7-14 days based on label and weather pressure.",
+        description: `Targets active ${disease} pressure more effectively than protectant-only programs when lesions are already present on ${plant}.`,
+        safety_precautions: [...baseSafety, "Do not exceed seasonal application limits for the active ingredient."],
+        effectiveness_rating: 5,
+      },
+      {
+        name: `${plant} Bacillus biofungicide`,
+        type: "organic",
+        proportions: "Apply labeled Bacillus-based biofungicide to upper and lower leaf surfaces.",
+        frequency: provisional ? "Reapply every 5-7 days while confirming diagnosis." : "Reapply every 7 days under humid conditions.",
+        description: `A lower-risk first-line biological option that can suppress fungal surface activity linked to ${disease}.`,
+        safety_precautions: ["Best used preventively or at early symptom stage.", "Do not mix incompatibly with strong alkaline sprays unless label permits."],
+        effectiveness_rating: 3,
+      },
+      {
+        name: `${plant} sanitation and canopy drying plan`,
+        type: "organic",
+        proportions: "Remove heavily infected tissue, improve airflow, and avoid overhead irrigation late in the day.",
+        frequency: "Scout every 2-3 days and repeat sanitation after rain events.",
+        description: `Reduces reinfection pressure and leaf wetness duration that typically worsens ${disease} on ${plant}.`,
+        safety_precautions: ["Disinfect tools between plants or blocks.", "Dispose of infected tissue away from production areas."],
+        effectiveness_rating: 4,
+      },
+    ];
+  }
+
+  if (bucket === "bacterial") {
+    return [
+      {
+        name: `${plant} copper bactericide protectant`,
+        type: "chemical",
+        proportions: "Use a crop-labeled copper bactericide rate and maintain even coverage on susceptible tissue.",
+        frequency: "Repeat every 5-7 days during rain or splash events.",
+        description: `Helps reduce surface bacterial spread associated with ${disease} on ${plant}.`,
+        safety_precautions: baseSafety,
+        effectiveness_rating: 3,
+      },
+      {
+        name: `${plant} targeted bactericide program`,
+        type: "chemical",
+        proportions: "Use region- and crop-approved bactericide options only where label and local regulation allow.",
+        frequency: "Apply within label intervals during active infection pressure.",
+        description: `Provides stronger suppression when ${disease} is already established and weather favors bacterial spread.`,
+        safety_precautions: [...baseSafety, "Verify local legal approval before use of antibiotic-based bactericides."],
+        effectiveness_rating: 4,
+      },
+      {
+        name: `${plant} sanitation and splash reduction`,
+        type: "organic",
+        proportions: "Prune or remove heavily infected tissue and stop overhead irrigation where possible.",
+        frequency: "Repeat sanitation weekly and after storms.",
+        description: `Critical for bacterial issues because splash spread and tool transfer often intensify ${disease}.`,
+        safety_precautions: ["Disinfect tools between cuts.", "Avoid handling plants while foliage is wet."],
+        effectiveness_rating: 4,
+      },
+      {
+        name: `${plant} biological leaf protectant`,
+        type: "organic",
+        proportions: "Apply a labeled biological protectant based on Bacillus or related beneficial microbes.",
+        frequency: "Reapply every 5-7 days during high humidity periods.",
+        description: `Useful as a lower-risk support program for ${disease}, especially in provisional diagnosis mode.`,
+        safety_precautions: ["Use as part of an integrated program, not as the only action under severe pressure."],
+        effectiveness_rating: 3,
+      },
+    ];
+  }
+
+  if (bucket === "viral") {
+    return [
+      {
+        name: `${plant} vector-targeted insecticide rotation`,
+        type: "chemical",
+        proportions: "Use crop-labeled insecticide groups targeting aphids, whiteflies, or other likely vectors.",
+        frequency: "Apply according to scouting thresholds and rotate modes of action.",
+        description: `There is no curative chemistry for ${disease}; control focuses on the insect vectors that spread it in ${plant}.`,
+        safety_precautions: baseSafety,
+        effectiveness_rating: 4,
+      },
+      {
+        name: `${plant} horticultural oil or soap vector suppression`,
+        type: "chemical",
+        proportions: "Apply labeled horticultural oil or insecticidal soap to suppress vector populations on new growth.",
+        frequency: "Repeat every 5-7 days while vector pressure persists.",
+        description: `Useful for reducing virus spread pressure by lowering active vector feeding.`,
+        safety_precautions: ["Do not apply during extreme heat.", "Check compatibility with sulfur or recent oil sprays."],
+        effectiveness_rating: 3,
+      },
+      {
+        name: `${plant} rogue infected plants and weeds`,
+        type: "organic",
+        proportions: "Remove severely symptomatic plants and nearby alternative hosts that can harbor vectors or virus sources.",
+        frequency: "Inspect every 2-3 days during spread periods.",
+        description: `Reduces secondary spread sources when ${disease} is likely viral and already visible in the field.`,
+        safety_precautions: ["Bag infected material and remove it from the production area."],
+        effectiveness_rating: 5,
+      },
+      {
+        name: `${plant} biological vector management`,
+        type: "organic",
+        proportions: "Use biological controls or trap-based suppression suitable for the identified vector complex.",
+        frequency: "Maintain through the vector activity window.",
+        description: `Supports lower-residue vector suppression when managing likely virus transmission in ${plant}.`,
+        safety_precautions: ["Match biological controls to the actual vector before release or application."],
+        effectiveness_rating: 3,
+      },
+    ];
+  }
+
+  if (bucket === "physiological") {
+    return [
+      {
+        name: `${plant} corrective foliar nutrient program`,
+        type: "chemical",
+        proportions: "Use a crop-labeled foliar nutrient correction based on the suspected deficiency pattern.",
+        frequency: "Reassess in 5-7 days before repeating.",
+        description: `Targets visual stress patterns that are more consistent with ${disease} than with an infectious outbreak.`,
+        safety_precautions: ["Do not exceed label concentration to avoid leaf burn."],
+        effectiveness_rating: 4,
+      },
+      {
+        name: `${plant} root-zone nutrition reset`,
+        type: "chemical",
+        proportions: "Adjust fertigation or soil-applied nutrition using recent soil/tissue test guidance.",
+        frequency: "Review weekly until vigor stabilizes.",
+        description: `Addresses underlying nutrient imbalance or uptake issues associated with the current stress pattern.`,
+        safety_precautions: ["Base changes on soil or tissue data where possible."],
+        effectiveness_rating: 4,
+      },
+      {
+        name: `${plant} irrigation uniformity correction`,
+        type: "organic",
+        proportions: "Correct dry/wet zone imbalance and reduce sudden swings in root-zone moisture.",
+        frequency: "Monitor soil moisture daily until stress symptoms stabilize.",
+        description: `Helps reverse non-pathogenic stress symptoms that often worsen with inconsistent watering.`,
+        safety_precautions: ["Avoid overcorrection that causes waterlogging."],
+        effectiveness_rating: 5,
+      },
+      {
+        name: `${plant} low-risk biostimulant recovery support`,
+        type: "organic",
+        proportions: "Use crop-labeled seaweed, humic, or amino-acid support products where appropriate.",
+        frequency: "Repeat every 7-10 days during recovery.",
+        description: `Supports recovery while you correct the root cause of the observed stress pattern on ${plant}.`,
+        safety_precautions: ["Use only as a support measure; fix the underlying water/nutrient issue first."],
+        effectiveness_rating: 3,
+      },
+    ];
+  }
+
+  return [
+    {
+      name: `${plant} targeted protective spray`,
+      type: "chemical",
+      proportions: "Use a crop-labeled protective spray matched to the diagnosed issue and local guidance.",
+      frequency: "Repeat per label during active pressure windows.",
+      description: `Provides a conservative first chemical option while confirming the exact ${disease} management program for ${plant}.`,
+      safety_precautions: baseSafety,
+      effectiveness_rating: 3,
+    },
+    {
+      name: `${plant} rotation-safe systemic program`,
+      type: "chemical",
+      proportions: "Use a crop-approved rotation partner only if symptoms continue to expand.",
+      frequency: "Apply within label interval and rotate modes of action.",
+      description: `Escalation option for persistent ${disease} pressure after confirming crop-label fit.`,
+      safety_precautions: [...baseSafety, "Check residue and pre-harvest interval restrictions."],
+      effectiveness_rating: 4,
+    },
+    {
+      name: `${plant} sanitation and scouting block plan`,
+      type: "organic",
+      proportions: "Remove heavily affected tissue and scout surrounding plants systematically.",
+      frequency: "Scout every 2-3 days.",
+      description: `Reduces spread pressure and improves confidence in how ${disease} is progressing.`,
+      safety_precautions: ["Disinfect tools between plants or rows."],
+      effectiveness_rating: 4,
+    },
+    {
+      name: `${plant} biological support spray`,
+      type: "organic",
+      proportions: "Apply a crop-labeled biological support product appropriate for foliar disease pressure.",
+      frequency: "Reapply every 5-7 days as preventive support.",
+      description: `Useful as a lower-risk integrated option while refining the exact disease program for ${plant}.`,
+      safety_precautions: ["Use alongside scouting and environmental management, not as the only control in severe outbreaks."],
+      effectiveness_rating: 3,
+    },
+  ];
+};
+
+const normalizeTreatmentOutput = (schema, prompt, items) => {
+  const fallbacks = buildTreatmentFallbackSet(prompt);
+  const raw = Array.isArray(items) ? items : [];
+  const normalized = fallbacks.map((fallback, index) => {
+    const candidate = raw[index] && typeof raw[index] === "object" ? raw[index] : {};
+    const type = String(candidate.type || fallback.type).toLowerCase() === "organic" ? "organic" : "chemical";
+    const safety = Array.isArray(candidate.safety_precautions)
+      ? candidate.safety_precautions.filter(Boolean).slice(0, 6)
+      : typeof candidate.safety === "string" && candidate.safety.trim()
+        ? [candidate.safety.trim()]
+        : fallback.safety_precautions;
+    return {
+      name: String(candidate.name || fallback.name),
+      type,
+      proportions: String(candidate.proportions || candidate.application_method || candidate.instructions || fallback.proportions),
+      frequency: String(candidate.frequency || fallback.frequency),
+      description: String(candidate.description || fallback.description),
+      safety_precautions: safety,
+      effectiveness_rating: clamp(Math.round(n(candidate.effectiveness_rating, fallback.effectiveness_rating)), 1, 5),
+    };
   });
+  return shape(schema, { treatments: normalized.slice(0, 4) });
+};
+
+const buildTreatmentsFallback = (schema, prompt) => normalizeTreatmentOutput(schema, prompt, []);
 
 export const uploadTransientFile = (payload = {}) => {
   const fileName = String(payload.file_name || "upload").trim() || "upload";
@@ -611,13 +865,19 @@ export const invokeLlm = async (payload = {}, env = {}) => {
   }
 
   const aiOut = await callGemini({ prompt, schema, fileUrls, env });
-  if (aiOut != null) return aiOut;
+  if (aiOut != null) {
+    if (type === "treatments") return normalizeTreatmentOutput(schema, prompt, aiOut?.treatments);
+    return aiOut;
+  }
 
   if (type === "timeline") return buildTimelineFallback(schema, prompt);
   if (type === "suggestions") return buildSuggestionsFallback(schema);
   if (type === "predictions") return buildPredictionsFallback(schema);
-  if (type === "treatments") return buildTreatmentsFallback(schema);
+  if (type === "treatments") return buildTreatmentsFallback(schema, prompt);
   return shape(schema, generic(schema));
 };
+
+
+
 
 
